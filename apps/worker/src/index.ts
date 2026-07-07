@@ -1,50 +1,121 @@
 // @oxyqa/worker — async processing (BullMQ consumer).
 //
-// This increment proves the full ingress→queue→GitHub-auth chain: pull a job,
-// authenticate as the installation, fetch the PR's changed files, log a summary.
-//
-// NEXT (Phase 1 completion):
-//   - parse hunks/symbols from the diff (parse-diff)
-//   - enrich context (.oxyqa/context.md, docs, linked tickets)
-//   - generateObject() with a Zod test-case schema (@oxyqa/core/llm)
-//   - post/update a PR comment, persist the plan + test cases to @oxyqa/db
-import { PR_QUEUE_NAME, createRedisConnection, getConfig, type PrJob } from "@oxyqa/core";
+// The core loop: pull a job → auth as the installation → fetch diff → generate
+// a test plan → post/update the PR comment → persist plan, cases, and usage.
+import {
+  COMMENT_MARKER,
+  PR_QUEUE_NAME,
+  type PrJob,
+  createRedisConnection,
+  formatDiff,
+  generateTestPlan,
+  getConfig,
+  renderPlanComment,
+} from "@oxyqa/core";
+import { createDb, installations, plans, testCases, usage } from "@oxyqa/db";
 import { Worker } from "bullmq";
+import { eq } from "drizzle-orm";
 import { App } from "octokit";
 
 const config = getConfig();
 const connection = createRedisConnection(config.redisUrl);
-
-// GitHub App: one App instance, per-installation Octokit minted per job (JWT →
-// short-lived installation token, cached by Octokit).
-const githubApp = new App({
-  appId: config.github.appId,
-  privateKey: config.github.privateKey,
-});
+const db = createDb(config.databaseUrl);
+const githubApp = new App({ appId: config.github.appId, privateKey: config.github.privateKey });
 
 const worker = new Worker<PrJob>(
   PR_QUEUE_NAME,
   async (job) => {
     const { installationId, owner, repo, prNumber, headSha } = job.data;
-    console.log(`[oxyqa-worker] PR #${prNumber} (${owner}/${repo}@${headSha.slice(0, 7)}) — start`);
+    const log = (msg: string) => console.log(`[oxyqa-worker] PR #${prNumber} — ${msg}`);
+    log(`start (${owner}/${repo}@${headSha.slice(0, 7)})`);
 
     const octokit = await githubApp.getInstallationOctokit(installationId);
+
+    // Tenant + plan rows up front so the plan exists (idempotent) even if we fail later.
+    await db
+      .insert(installations)
+      .values({ id: installationId, accountLogin: owner, accountType: "Organization" })
+      .onConflictDoNothing();
+    const [planRow] = await db
+      .insert(plans)
+      .values({ installationId, owner, repo, prNumber, headSha, status: "processing" })
+      .onConflictDoUpdate({
+        target: [plans.installationId, plans.repo, plans.headSha],
+        set: { status: "processing", updatedAt: new Date() },
+      })
+      .returning({ id: plans.id });
+    const planId = planRow!.id;
+
+    // 1. Fetch PR metadata + diff.
+    const { data: pr } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
     const { data: files } = await octokit.rest.pulls.listFiles({
       owner,
       repo,
       pull_number: prNumber,
       per_page: 100,
     });
+    const diff = formatDiff(files);
+    log(`${files.length} files changed`);
 
-    const changed = files.length;
-    const additions = files.reduce((n, f) => n + f.additions, 0);
-    const deletions = files.reduce((n, f) => n + f.deletions, 0);
-    console.log(
-      `[oxyqa-worker] PR #${prNumber} — ${changed} files changed (+${additions}/-${deletions})`,
+    // 2. Generate the test plan (provider-agnostic LLM call).
+    const { plan, promptVersion, usage: tokens } = await generateTestPlan(config.llm, {
+      prTitle: pr.title,
+      prBody: pr.body ?? undefined,
+      diff,
+    });
+    log(`generated ${plan.testCases.length} test cases (${tokens.inputTokens}→${tokens.outputTokens} tok)`);
+
+    // 3. Post or update the PR comment (idempotent via the hidden marker).
+    const body = renderPlanComment(plan, { headSha, promptVersion });
+    const { data: comments } = await octokit.rest.issues.listComments({
+      owner,
+      repo,
+      issue_number: prNumber,
+      per_page: 100,
+    });
+    const existing = comments.find((c) => c.body?.includes(COMMENT_MARKER));
+    let commentId: number;
+    if (existing) {
+      await octokit.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+      commentId = existing.id;
+      log(`updated comment ${commentId}`);
+    } else {
+      const { data: created } = await octokit.rest.issues.createComment({
+        owner,
+        repo,
+        issue_number: prNumber,
+        body,
+      });
+      commentId = created.id;
+      log(`posted comment ${commentId}`);
+    }
+
+    // 4. Persist: plan status, test cases (replace on re-run), metered usage.
+    await db
+      .update(plans)
+      .set({ status: "posted", commentId, promptVersion, updatedAt: new Date() })
+      .where(eq(plans.id, planId));
+    await db.delete(testCases).where(eq(testCases.planId, planId));
+    await db.insert(testCases).values(
+      plan.testCases.map((tc) => ({
+        planId,
+        title: tc.title,
+        description: tc.description,
+        steps: tc.steps,
+        expected: tc.expected,
+        priority: tc.priority,
+      })),
     );
+    await db.insert(usage).values({
+      installationId,
+      repo,
+      prNumber,
+      model: config.llm.model,
+      inputTokens: tokens.inputTokens,
+      outputTokens: tokens.outputTokens,
+    });
 
-    // TODO(Phase 1): diff parse → context enrich → generateObject → PR comment → persist.
-    return { changed, additions, deletions };
+    return { testCases: plan.testCases.length, commentId };
   },
   { connection, concurrency: 5 },
 );

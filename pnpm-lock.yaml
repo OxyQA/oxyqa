@@ -67,6 +67,12 @@ importers:
       bullmq:
         specifier: ^5.28.1
         version: 5.79.3
+      dotenv:
+        specifier: ^16.4.5
+        version: 16.6.1
+      drizzle-orm:
+        specifier: ^0.36.4
+        version: 0.36.4(@opentelemetry/api@1.9.0)(postgres@3.4.9)(react@19.2.7)
       octokit:
         specifier: ^4.0.2
         version: 4.1.4

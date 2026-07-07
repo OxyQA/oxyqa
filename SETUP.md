@@ -30,6 +30,19 @@ Create a Redis database → copy the **`rediss://` URL** → that's your `REDIS_
 ### Anthropic
 Create an API key → that's your `ANTHROPIC_API_KEY`.
 
+## Quick test — LLM step only (needs just an Anthropic key)
+
+Before wiring the full GitHub/DB/Redis loop, you can see the core value work in
+isolation. Set `ANTHROPIC_API_KEY` (in the repo-root `.env` or inline) and run:
+
+```bash
+pnpm --filter @oxyqa/worker generate:sample
+```
+
+It feeds a sample diff through `generateObject` + Zod and prints the generated
+test plan as the exact Markdown comment that would land on a PR. No GitHub App,
+Supabase, or Upstash required.
+
 ## 2. Fill `.env`
 
 ```bash
