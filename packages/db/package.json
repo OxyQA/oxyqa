@@ -1,0 +1,16 @@
+{
+  "name": "@oxyqa/db",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Drizzle ORM schema + queries: installs, configs, plans, feedback, usage, billing.",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "clean": "rm -rf dist .turbo *.tsbuildinfo"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "@oxyqa/dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Next.js dashboard (Phase 5): install management, usage stats, plan history, config, billing. Ship AFTER the core loop works.",
+  "type": "module",
+  "scripts": {
+    "dev": "echo \"dashboard — deferred to Phase 5\" && exit 0",
+    "build": "echo \"dashboard — deferred to Phase 5\" && exit 0",
+    "typecheck": "echo \"dashboard — deferred to Phase 5\" && exit 0",
+    "clean": "rm -rf dist .next .turbo *.tsbuildinfo"
+  }
+}
