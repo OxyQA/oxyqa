@@ -53,20 +53,26 @@ oxyqa/
 
 *Every choice is self-hostable or config-swappable — that's the through-line.*
 
-## Getting started (Phase 0)
+## Getting started
+
+Full account setup + run instructions are in **[SETUP.md](SETUP.md)**. Quick version:
 
 ```bash
-# 1. Install pnpm (via corepack, ships with Node 20+)
-corepack enable && corepack prepare pnpm@9.12.0 --activate
+# 1. Install pnpm without sudo (corepack ships with Node 20+)
+mkdir -p ~/.local/bin && corepack enable --install-directory ~/.local/bin pnpm
+export PATH="$HOME/.local/bin:$PATH"
 
-# 2. Install workspace deps (once package deps are added)
+# 2. Install workspace deps
 pnpm install
 
-# 3. Copy env template and fill in
-cp .env.example .env
+# 3. Configure (see SETUP.md for where each value comes from)
+cp .env.example .env   # then fill it in
 
-# 4. Run the dev pipeline
-pnpm dev
+# 4. Push schema to Postgres, then run the two services + webhook tunnel
+pnpm --filter @oxyqa/db db:push
+pnpm --filter @oxyqa/worker dev
+pnpm --filter @oxyqa/webhook dev
+npx smee -u <smee-url> -t http://localhost:3001/webhooks/github
 ```
 
 ## Build order (from the roadmap)

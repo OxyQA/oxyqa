@@ -1,10 +1,78 @@
-// @oxyqa/webhook — ingress service (Hono + Octokit).
+// @oxyqa/webhook — ingress service.
 //
-// Phase 1 responsibility (fast path, do almost nothing inline):
-//   1. verify GitHub webhook signature
-//   2. dedup by PR head SHA
-//   3. enqueue a job onto BullMQ
-//   4. return 200 in <1s (GitHub times out at ~10s)
-//
-// Nothing implemented yet — Phase 0 skeleton.
-export {};
+// Fast path only (GitHub times out at ~10s): verify signature → dedup by head
+// SHA → enqueue → return 200. All real work happens in @oxyqa/worker.
+import { serve } from "@hono/node-server";
+import { verify } from "@octokit/webhooks-methods";
+import { createPrQueue, createRedisConnection, getConfig, type PrJob } from "@oxyqa/core";
+import { Hono } from "hono";
+
+const config = getConfig();
+const redis = createRedisConnection(config.redisUrl);
+const queue = createPrQueue(redis);
+
+// The PR actions worth generating a plan for. Skip label/assignee/etc noise.
+const HANDLED_ACTIONS = new Set(["opened", "synchronize", "reopened", "ready_for_review"]);
+
+// Minimal shape of the fields we read off a pull_request event payload.
+interface PullRequestEvent {
+  action: string;
+  installation?: { id: number };
+  repository: { name: string; owner: { login: string } };
+  pull_request: { number: number; head: { sha: string }; draft?: boolean };
+}
+
+const app = new Hono();
+
+app.get("/", (c) => c.json({ service: "oxyqa-webhook", ok: true }));
+
+app.post("/webhooks/github", async (c) => {
+  const signature = c.req.header("x-hub-signature-256");
+  const eventName = c.req.header("x-github-event");
+  const raw = await c.req.text();
+
+  if (!signature || !(await verify(config.github.webhookSecret, raw, signature))) {
+    return c.json({ error: "invalid signature" }, 401);
+  }
+
+  // Only pull_request events produce plans; ack everything else so GitHub is happy.
+  if (eventName !== "pull_request") {
+    return c.json({ ok: true, ignored: eventName }, 200);
+  }
+
+  const payload = JSON.parse(raw) as PullRequestEvent;
+  if (!HANDLED_ACTIONS.has(payload.action) || payload.pull_request.draft) {
+    return c.json({ ok: true, skipped: payload.action }, 200);
+  }
+  if (!payload.installation?.id) {
+    return c.json({ error: "missing installation" }, 400);
+  }
+
+  const owner = payload.repository.owner.login;
+  const repo = payload.repository.name;
+  const headSha = payload.pull_request.head.sha;
+
+  // Idempotency: first event for a given head SHA wins; GitHub re-fires are dropped.
+  const dedupKey = `oxyqa:seen:${owner}/${repo}:${headSha}`;
+  const isFirst = await redis.set(dedupKey, "1", "EX", 3600, "NX");
+  if (isFirst !== "OK") {
+    return c.json({ ok: true, duplicate: headSha }, 200);
+  }
+
+  const job: PrJob = {
+    installationId: payload.installation.id,
+    owner,
+    repo,
+    prNumber: payload.pull_request.number,
+    headSha,
+    action: payload.action,
+  };
+  // Job id = head SHA so BullMQ also dedups at the queue level.
+  await queue.add("process-pr", job, { jobId: headSha });
+
+  return c.json({ ok: true, queued: job.prNumber }, 200);
+});
+
+serve({ fetch: app.fetch, port: config.webhookPort }, (info) => {
+  console.log(`[oxyqa-webhook] listening on :${info.port}`);
+});

@@ -12,7 +12,11 @@
     "clean": "rm -rf dist .turbo *.tsbuildinfo"
   },
   "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "@octokit/webhooks-methods": "^5.1.0",
     "@oxyqa/core": "workspace:*",
-    "@oxyqa/db": "workspace:*"
+    "@oxyqa/db": "workspace:*",
+    "hono": "^4.6.12",
+    "zod": "^3.23.8"
   }
 }
