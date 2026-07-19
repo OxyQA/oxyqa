@@ -124,3 +124,14 @@ worker.on("completed", (job) => console.log(`[oxyqa-worker] job ${job.id} done`)
 worker.on("failed", (job, err) => console.error(`[oxyqa-worker] job ${job?.id} failed:`, err.message));
 
 console.log(`[oxyqa-worker] listening on queue "${PR_QUEUE_NAME}"`);
+
+// Graceful shutdown: worker.close() waits for active jobs to finish before
+// resolving, so a Railway redeploy never kills a plan mid-generation.
+async function shutdown(signal: string) {
+  console.log(`[oxyqa-worker] ${signal} — draining (waiting for active jobs)`);
+  await worker.close();
+  connection.disconnect();
+  process.exit(0);
+}
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
