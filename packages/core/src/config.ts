@@ -1,11 +1,33 @@
 // Centralized, env-driven configuration. Nothing else in the codebase reads
 // process.env directly — this is the single boundary that makes the same code
 // run as cloud SaaS and self-hosted (Phase 0/4 principle).
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { config as loadDotenv } from "dotenv";
 import { z } from "zod";
 
-loadDotenv();
+// Services run with their cwd inside apps/* (via `pnpm --filter … dev`), but the
+// single .env lives at the monorepo root. Walk up from the cwd to find it so the
+// same code works from any package. In prod (Railway/Fly) there's no .env file —
+// env vars are injected — so no file is found and dotenv is simply skipped.
+function findEnvFile(startDir: string): string | undefined {
+  let dir = startDir;
+  for (let i = 0; i < 8; i++) {
+    const candidate = resolve(dir, ".env");
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return undefined;
+}
+
+const envPath = findEnvFile(process.cwd());
+loadDotenv(envPath ? { path: envPath } : undefined);
+
+// Relative paths in .env (e.g. the private key) are resolved against the .env's
+// own directory (the repo root), not the process cwd which varies per service.
+const envDir = envPath ? dirname(envPath) : process.cwd();
 
 const schema = z.object({
   OXYQA_MODE: z.enum(["cloud", "self-hosted"]).default("cloud"),
@@ -36,7 +58,7 @@ type RawEnv = z.infer<typeof schema>;
 function resolvePrivateKey(env: RawEnv): string {
   if (env.GITHUB_APP_PRIVATE_KEY) return env.GITHUB_APP_PRIVATE_KEY;
   if (env.GITHUB_APP_PRIVATE_KEY_PATH) {
-    return readFileSync(env.GITHUB_APP_PRIVATE_KEY_PATH, "utf8");
+    return readFileSync(resolve(envDir, env.GITHUB_APP_PRIVATE_KEY_PATH), "utf8");
   }
   throw new Error(
     "Missing GitHub App private key: set GITHUB_APP_PRIVATE_KEY (inline PEM) or GITHUB_APP_PRIVATE_KEY_PATH (path to .pem).",

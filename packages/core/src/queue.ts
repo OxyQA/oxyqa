@@ -4,7 +4,9 @@
 import { Queue } from "bullmq";
 import { Redis } from "ioredis";
 
-export const PR_QUEUE_NAME = "oxyqa:pr";
+// No ':' — BullMQ reserves the colon as its internal Redis key separator and
+// rejects queue names that contain it.
+export const PR_QUEUE_NAME = "oxyqa-pr";
 
 /** One unit of work: a pull request event that needs a QA test plan. */
 export interface PrJob {
