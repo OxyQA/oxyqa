@@ -3,6 +3,10 @@
 A snapshot of what's been built and decided, for continuing in another session.
 Last updated: current session.
 
+> **⚠️ Forward guidance now lives in [DECISIONS.md](DECISIONS.md)** — standing
+> decisions, phase specs, and resume state. This file remains as history
+> through 2026-07-18.
+
 ---
 
 ## What OxyQA is
