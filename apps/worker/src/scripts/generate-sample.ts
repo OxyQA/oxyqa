@@ -15,23 +15,72 @@ const llm = {
   anthropicApiKey: process.env.ANTHROPIC_API_KEY,
 };
 
-// A small, realistic diff: adds an expiry check to token validation.
+// A realistic full-stack web-app login change: account lockout after 5 failed
+// attempts, generic error messages (anti-enumeration), plus the matching UI.
 const sampleFiles = [
   {
-    filename: "src/auth/verifyToken.ts",
+    filename: "server/routes/auth.js",
     status: "modified",
-    additions: 6,
-    deletions: 1,
-    patch: `@@ -8,7 +8,12 @@ export function verifyToken(token: string): Session {
-   const payload = decode(token);
-   if (!payload) throw new AuthError("malformed token");
--  return { userId: payload.sub };
-+  if (payload.exp && payload.exp * 1000 < Date.now()) {
-+    throw new AuthError("token expired");
+    additions: 18,
+    deletions: 7,
+    patch: `@@ -12,15 +12,28 @@ router.post('/login', async (req, res) => {
+   const { email, password } = req.body;
+   const user = await db.users.findByEmail(email);
+-  if (!user) {
+-    return res.status(404).json({ error: 'No account with that email' });
+-  }
+-  const valid = await bcrypt.compare(password, user.passwordHash);
+-  if (!valid) {
+-    return res.status(401).json({ error: 'Wrong password' });
+-  }
++  if (!user) {
++    return res.status(401).json({ error: 'Invalid credentials' });
 +  }
-+  if (!payload.sub) throw new AuthError("token missing subject");
-+  return { userId: payload.sub, expiresAt: payload.exp };
- }`,
++  if (user.lockedUntil && user.lockedUntil > Date.now()) {
++    return res.status(423).json({ error: 'Account temporarily locked. Try again later.' });
++  }
++  const valid = await bcrypt.compare(password, user.passwordHash);
++  if (!valid) {
++    user.failedAttempts = (user.failedAttempts || 0) + 1;
++    if (user.failedAttempts >= 5) {
++      user.lockedUntil = Date.now() + 15 * 60 * 1000;
++    }
++    await db.users.save(user);
++    return res.status(401).json({ error: 'Invalid credentials' });
++  }
++  user.failedAttempts = 0;
++  user.lockedUntil = null;
++  await db.users.save(user);
+   const token = signSession(user.id);
+   res.json({ token });`,
+  },
+  {
+    filename: "client/src/LoginForm.jsx",
+    status: "modified",
+    additions: 8,
+    deletions: 4,
+    patch: `@@ -20,10 +20,17 @@ export function LoginForm() {
+     const res = await fetch('/api/login', {
+       method: 'POST',
+       headers: { 'Content-Type': 'application/json' },
+       body: JSON.stringify({ email, password }),
+     });
+-    if (!res.ok) {
+-      setError('Login failed');
+-      return;
+-    }
++    if (res.status === 423) {
++      setError('Your account is temporarily locked. Try again in 15 minutes.');
++      setLocked(true);
++      return;
++    }
++    if (!res.ok) {
++      setError('Invalid email or password');
++      return;
++    }
+     const { token } = await res.json();
+     saveToken(token);
+     navigate('/dashboard');`,
   },
 ];
 
@@ -45,12 +94,16 @@ async function main() {
   console.log(`Generating with ${llm.model}...\n`);
 
   const { plan, usage } = await generateTestPlan(llm, {
-    prTitle: "Add token expiry and subject checks to verifyToken",
-    prBody: "Tokens were accepted even after expiry. Also guard against a missing subject claim.",
+    prTitle: "Lock accounts after 5 failed logins + generic error messages",
+    prBody:
+      "Adds account lockout (15 min after 5 failed attempts) and switches to generic 'Invalid credentials' errors so attackers can't tell whether an email exists. Frontend shows a lockout message.",
     diff,
   });
 
-  console.log(`--- Test plan (${plan.testCases.length} cases, ${usage.inputTokens}→${usage.outputTokens} tokens) ---\n`);
+  console.log(`Generated ${plan.testCases.length} cases (${usage.inputTokens}→${usage.outputTokens} tokens)\n`);
+  console.log("=== RAW STRUCTURED OBJECT (Zod-validated, stored in DB / sent to Jira) ===\n");
+  console.log(JSON.stringify(plan, null, 2));
+  console.log("\n=== RENDERED PR COMMENT (Markdown) ===\n");
   console.log(renderPlanComment(plan, { headSha: "sample00", promptVersion: "v1" }));
 }
 
