@@ -49,8 +49,9 @@ const schema = z.object({
   LLM_MODEL: z.string().default("claude-sonnet-4-6"),
   ANTHROPIC_API_KEY: z.string().optional(),
 
-  // Ports
-  WEBHOOK_PORT: z.coerce.number().default(3001),
+  // Ports. WEBHOOK_PORT wins if set; PORT is what Railway/Fly inject.
+  WEBHOOK_PORT: z.coerce.number().optional(),
+  PORT: z.coerce.number().optional(),
 });
 
 type RawEnv = z.infer<typeof schema>;
@@ -90,7 +91,7 @@ function load() {
       model: env.LLM_MODEL,
       anthropicApiKey: env.ANTHROPIC_API_KEY,
     },
-    webhookPort: env.WEBHOOK_PORT,
+    webhookPort: env.WEBHOOK_PORT ?? env.PORT ?? 3001,
   };
 }
 

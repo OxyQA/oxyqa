@@ -26,6 +26,17 @@ const app = new Hono();
 
 app.get("/", (c) => c.json({ service: "oxyqa-webhook", ok: true }));
 
+// Railway healthcheck target. Reports Redis reachability without failing hard:
+// a webhook that can't enqueue is degraded, and the deploy should know.
+app.get("/health", async (c) => {
+  try {
+    await redis.ping();
+    return c.json({ ok: true, redis: "up" });
+  } catch {
+    return c.json({ ok: false, redis: "down" }, 503);
+  }
+});
+
 app.post("/webhooks/github", async (c) => {
   const signature = c.req.header("x-hub-signature-256");
   const eventName = c.req.header("x-github-event");
@@ -73,6 +84,18 @@ app.post("/webhooks/github", async (c) => {
   return c.json({ ok: true, queued: job.prNumber }, 200);
 });
 
-serve({ fetch: app.fetch, port: config.webhookPort }, (info) => {
+const server = serve({ fetch: app.fetch, port: config.webhookPort }, (info) => {
   console.log(`[oxyqa-webhook] listening on :${info.port}`);
 });
+
+// Graceful shutdown: stop accepting requests, flush the queue connection, exit.
+// Railway sends SIGTERM on every redeploy; without this, in-flight enqueues die.
+async function shutdown(signal: string) {
+  console.log(`[oxyqa-webhook] ${signal} — shutting down`);
+  server.close();
+  await queue.close();
+  redis.disconnect();
+  process.exit(0);
+}
+process.on("SIGTERM", () => void shutdown("SIGTERM"));
+process.on("SIGINT", () => void shutdown("SIGINT"));
