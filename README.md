@@ -32,8 +32,10 @@ oxyqa/
 └── tsconfig.base.json
 ```
 
-> Everything under `src/` is a **Phase 0 skeleton** — placeholders only, no
-> logic yet. See the roadmap for what fills them in.
+> **Status:** Phases 0–1 are built and running — the full loop (webhook → queue
+> → worker → LLM → PR comment → persistence) is verified on real PRs, deployed
+> to staging on Railway, and dogfooding on this repo's own pull requests. See
+> [DECISIONS.md](DECISIONS.md) for standing decisions and current phase specs.
 
 ## Tech stack
 
@@ -77,8 +79,8 @@ npx smee -u <smee-url> -t http://localhost:3001/webhooks/github
 
 ## Build order (from the roadmap)
 
-- **Phase 0** — Foundations: monorepo skeleton (this), register dev GitHub App, local webhook tunnel (smee/cloudflared), `@octokit/auth-app`, local Postgres in Docker, Drizzle schema.
-- **Phase 1** — Core loop: webhook → BullMQ → worker → diff parse → `generateObject` + Zod → PR comment. Idempotent on head SHA.
+- ✅ **Phase 0** — Foundations: monorepo skeleton (this), register dev GitHub App, local webhook tunnel (smee/cloudflared), `@octokit/auth-app`, local Postgres in Docker, Drizzle schema.
+- ✅ **Phase 1** — Core loop: webhook → BullMQ → worker → diff parse → `generateObject` + Zod → PR comment. Idempotent on head SHA.
 - **Phase 2** — Context enrichment (the differentiator): `.oxyqa/context.md`, repo docs, linked tickets, token-budget windowing, prompt versioning.
 - **Phase 3** — Integrations: push to Jira / Xray / Linear, two-way traceability.
 - **Phase 4** — Self-hosted packaging: one `docker-compose.yml`, bring-your-own-LLM, license key.
