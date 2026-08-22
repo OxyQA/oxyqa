@@ -4,15 +4,17 @@
 //   - config      env-driven configuration (the cloud/self-hosted boundary)
 //   - queue       shared PR job contract + BullMQ/Redis wiring
 //   - github/diff format changed files into a budgeted, prompt-ready diff
-//   - prompt      versioned prompt builder
+//   - prompt      versioned prompt builder (cached stable prefix + volatile tail)
 //   - llm         provider-agnostic generateObject + Zod test-plan schema
 //   - output      PR-comment renderer (update-in-place marker)
+//   - context     Phase 2: .oxyqa/context.md / README enrichment, budgeted
 //
 // Planned (Phase 2+):
-//   - context/      .oxyqa/context.md, repo docs, linked tickets, windowing
-//   - integrations/ Jira · Xray · Linear push
+//   - context/      repo memories (reply-to-agent), linked tickets
+//   - integrations/ Linear push (Jira/Xray deferred)
 export * from "./config.js";
 export * from "./queue.js";
+export * from "./context/repo.js";
 export * from "./github/diff.js";
 export * from "./prompt/build.js";
 export * from "./llm/model.js";

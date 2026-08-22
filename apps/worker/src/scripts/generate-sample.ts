@@ -5,7 +5,7 @@
 //   ANTHROPIC_API_KEY=... pnpm --filter @oxyqa/worker generate:sample
 //   (or put ANTHROPIC_API_KEY in the repo-root .env)
 import { config as loadDotenv } from "dotenv";
-import { formatDiff, generateTestPlan, renderPlanComment } from "@oxyqa/core";
+import { PROMPT_VERSION, formatDiff, generateTestPlan, renderPlanComment } from "@oxyqa/core";
 
 loadDotenv({ path: "../../.env" });
 
@@ -84,6 +84,13 @@ const sampleFiles = [
   },
 ];
 
+// Stands in for the target repo's .oxyqa/context.md — proves the enrichment
+// path shapes the plan (staging/env-var conventions should show up in cases).
+const sampleRepoContext = `## Testing conventions
+- We support three roles: anonymous, member, admin. Auth changes must be checked for all three.
+- Sessions are JWTs in an httpOnly cookie; "log out everywhere" must invalidate server-side.
+- Our users are on mobile Safari ~40% of the time — flag anything relying on desktop-only behavior.`;
+
 async function main() {
   if (!llm.anthropicApiKey) {
     console.error("Set ANTHROPIC_API_KEY (in the environment or repo-root .env) to run this.");
@@ -98,13 +105,16 @@ async function main() {
     prBody:
       "Adds account lockout (15 min after 5 failed attempts) and switches to generic 'Invalid credentials' errors so attackers can't tell whether an email exists. Frontend shows a lockout message.",
     diff,
+    repoContext: sampleRepoContext,
   });
 
-  console.log(`Generated ${plan.testCases.length} cases (${usage.inputTokens}→${usage.outputTokens} tokens)\n`);
+  console.log(
+    `Generated ${plan.testCases.length} cases (${usage.inputTokens}→${usage.outputTokens} tokens, cache read ${usage.cacheReadInputTokens} / write ${usage.cacheCreationInputTokens})\n`,
+  );
   console.log("=== RAW STRUCTURED OBJECT (Zod-validated, stored in DB / sent to Jira) ===\n");
   console.log(JSON.stringify(plan, null, 2));
   console.log("\n=== RENDERED PR COMMENT (Markdown) ===\n");
-  console.log(renderPlanComment(plan, { headSha: "sample00", promptVersion: "v1" }));
+  console.log(renderPlanComment(plan, { headSha: "sample00", promptVersion: PROMPT_VERSION }));
 }
 
 main().catch((err) => {

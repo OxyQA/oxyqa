@@ -6,16 +6,45 @@ import {
   COMMENT_MARKER,
   PR_QUEUE_NAME,
   type PrJob,
+  type RepoContentReader,
   createRedisConnection,
   formatDiff,
   generateTestPlan,
   getConfig,
+  loadRepoContext,
   renderPlanComment,
 } from "@oxyqa/core";
 import { createDb, installations, plans, testCases, usage } from "@oxyqa/db";
 import { Worker } from "bullmq";
 import { eq } from "drizzle-orm";
-import { App } from "octokit";
+import { App, type Octokit } from "octokit";
+
+// Adapts an installation Octokit onto core's minimal read surface so the
+// context loader stays GitHub-client-agnostic.
+function makeContentReader(octokit: Octokit, owner: string, repo: string): RepoContentReader {
+  const is404 = (err: unknown) => (err as { status?: number }).status === 404;
+  return {
+    async readFile(path, ref) {
+      try {
+        const { data } = await octokit.rest.repos.getContent({ owner, repo, path, ref });
+        if (Array.isArray(data) || data.type !== "file") return null;
+        return Buffer.from(data.content, "base64").toString("utf8");
+      } catch (err) {
+        if (is404(err)) return null;
+        throw err;
+      }
+    },
+    async readReadme(ref) {
+      try {
+        const { data } = await octokit.rest.repos.getReadme({ owner, repo, ref });
+        return Buffer.from(data.content, "base64").toString("utf8");
+      } catch (err) {
+        if (is404(err)) return null;
+        throw err;
+      }
+    },
+  };
+}
 
 const config = getConfig();
 const connection = createRedisConnection(config.redisUrl);
@@ -57,15 +86,22 @@ const worker = new Worker<PrJob>(
     const diff = formatDiff(files);
     log(`${files.length} files changed`);
 
-    // 2. Generate the test plan (provider-agnostic LLM call).
+    // 2. Load repo context (.oxyqa/context.md → README fallback) at the PR head.
+    const repoContext = await loadRepoContext(makeContentReader(octokit, owner, repo), headSha);
+    log(`context: ${repoContext.source}${repoContext.truncated ? " (truncated)" : ""}`);
+
+    // 3. Generate the test plan (provider-agnostic LLM call).
     const { plan, promptVersion, usage: tokens } = await generateTestPlan(config.llm, {
       prTitle: pr.title,
       prBody: pr.body ?? undefined,
       diff,
+      repoContext: repoContext.text,
     });
-    log(`generated ${plan.testCases.length} test cases (${tokens.inputTokens}→${tokens.outputTokens} tok)`);
+    log(
+      `generated ${plan.testCases.length} test cases (${tokens.inputTokens}→${tokens.outputTokens} tok, cache read ${tokens.cacheReadInputTokens} / write ${tokens.cacheCreationInputTokens})`,
+    );
 
-    // 3. Post or update the PR comment (idempotent via the hidden marker).
+    // 4. Post or update the PR comment (idempotent via the hidden marker).
     const body = renderPlanComment(plan, { headSha, promptVersion });
     const { data: comments } = await octokit.rest.issues.listComments({
       owner,
@@ -90,7 +126,7 @@ const worker = new Worker<PrJob>(
       log(`posted comment ${commentId}`);
     }
 
-    // 4. Persist: plan status, test cases (replace on re-run), metered usage.
+    // 5. Persist: plan status, test cases (replace on re-run), metered usage.
     await db
       .update(plans)
       .set({ status: "posted", commentId, promptVersion, updatedAt: new Date() })
