@@ -10,29 +10,16 @@ Companions: `README.md` (vision/roadmap) · `DEPLOY.md` (env runbook) ·
 
 ---
 
-## 0. Resume state — staging deploy is MID-FLIGHT
+## 0. Resume state — staging is LIVE; building Phase 2
 
-Where the guided Railway setup stopped (2026-07-19):
+Staging deploy completed 2026-08-22: webhook `/health` green at
+`oxyqawebhook-staging.up.railway.app`; worker migrated and consuming; GitHub App
+`oxyqa-staging` installed on `OxyQA/oxyqa`; dogfood verified (staging bot posted
+a test plan on PR #3). Merge to `main` auto-deploys staging.
 
-**Done:** Railway account + project created from `OxyQA/oxyqa`; services exist
-but **crashed on missing env vars (expected)**; deploy-ready PR #1 merged (CI
-green); staging Supabase/Upstash status: Supabase `oxyqa-staging` and Upstash
-staging **creation unconfirmed — ask**.
-
-**Remaining, in order:**
-1. Railway: delete the auto-created `dashboard` service (Phase-5 stub, must not deploy).
-2. Railway: rename environment `production` → `staging`; rename services
-   `webhook`/`worker`; set config-as-code paths `railway.webhook.json` /
-   `railway.worker.json` (worker's start must show `db:migrate && … start`).
-3. Railway: add shared vars (table in DEPLOY.md) — all but the three `GITHUB_*`.
-4. Webhook service → Generate Domain.
-5. Create **OxyQA Staging** GitHub App under the org (recipe in DEPLOY.md;
-   webhook URL = Railway domain + `/webhooks/github`). Suggested slug
-   `oxyqa-staging`.
-6. Add `GITHUB_APP_ID`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_PRIVATE_KEY`
-   (inline PEM) to Railway; redeploy; webhook `/health` should 200.
-7. Install staging App on `OxyQA/oxyqa` → open a trivial PR → **dogfood moment**
-   (staging bot comments a test plan on our own PR).
+Current build: **Phase 2 context enrichment (§3)**, sliced as three PRs —
+(1) repo context (`.oxyqa/context.md` / README) + prompt-caching restructure,
+(2) `.oxyqa/config.yml` behavior knobs, (3) reply-to-agent + repo memories (§4).
 
 Guided-setup style that worked: agent gives exact dashboard steps + verifies
 each credential via API before moving on; **secrets never pasted into chat**
@@ -141,6 +128,15 @@ Prose context stays in `context.md`. Per-install overrides live in the existing
 
 ## 8. Deliberately deferred (with revisit triggers)
 
+- **Auto-generated repo context (first-run bootstrap)** *(user, 2026-08-22)* —
+  when a repo has no `.oxyqa/context.md`, generate a starter one from repo
+  signals (README, file tree, test dirs, manifests) instead of relying on the
+  bare README excerpt. Two candidate shapes, pick at build time: (a) worker-side
+  behind a config toggle, or (b) a dashboard onboarding step (Phase 5) that
+  opens a PR adding the drafted file — PR form preferred so the team reviews
+  and owns the content. Costs an extra LLM call, so it must respect free-tier
+  gating. Trigger: Phase 5 onboarding build, or earlier if README-fallback
+  plan quality proves weak in beta.
 - **Jira/Xray** — trigger: first enterprise team asks.
 - **Executable test generation** — trigger: checklist edit-rate measured & good.
 - **Prod environment (Railway env #2, `oxyqa-prod` Supabase paid, fixed-Pro
