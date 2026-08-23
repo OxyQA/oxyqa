@@ -8,11 +8,13 @@
 //   - llm         provider-agnostic generateObject + Zod test-plan schema
 //   - output      PR-comment renderer (update-in-place marker)
 //   - context     Phase 2: .oxyqa/context.md / README enrichment, budgeted
+//   - repo-config Phase 2: .oxyqa/config.yml behavior knobs (defaults ← yml ← install)
 //
 // Planned (Phase 2+):
 //   - context/      repo memories (reply-to-agent), linked tickets
 //   - integrations/ Linear push (Jira/Xray deferred)
 export * from "./config.js";
+export * from "./repo-config.js";
 export * from "./queue.js";
 export * from "./context/repo.js";
 export * from "./github/diff.js";

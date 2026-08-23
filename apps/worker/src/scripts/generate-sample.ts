@@ -104,8 +104,10 @@ async function main() {
     prTitle: "Lock accounts after 5 failed logins + generic error messages",
     prBody:
       "Adds account lockout (15 min after 5 failed attempts) and switches to generic 'Invalid credentials' errors so attackers can't tell whether an email exists. Frontend shows a lockout message.",
-    diff,
+    diff: diff.text,
     repoContext: sampleRepoContext,
+    // Stands in for a resolved .oxyqa/config.yml (see repo-config.ts).
+    behavior: { maxCases: 8, focusAreas: ["session handling", "mobile Safari"] },
   });
 
   console.log(

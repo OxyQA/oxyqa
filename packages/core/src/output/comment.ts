@@ -1,9 +1,17 @@
 // Renders a TestPlan as a Markdown PR comment. The hidden marker lets the worker
 // find and update-in-place on re-runs instead of posting duplicates.
-import type { TestPlan } from "../llm/schema.js";
+//
+// Two layouts (RepoConfig.commentStyle): "flat" is the original single numbered
+// list; "grouped" buckets cases under priority headings. Case numbering stays
+// global in both, so "case 3" means the same thing in review discussion.
+import type { TestCase, TestPlan } from "../llm/schema.js";
 
 /** Hidden anchor — the worker greps comment bodies for this to update in place. */
 export const COMMENT_MARKER = "<!-- oxyqa:plan -->";
+
+export type CommentStyle = "grouped" | "flat";
+
+const PRIORITY_ORDER: TestCase["priority"][] = ["critical", "high", "medium", "low"];
 
 const PRIORITY_LABEL: Record<string, string> = {
   critical: "🔴 critical",
@@ -17,20 +25,39 @@ export interface CommentMeta {
   promptVersion: string;
 }
 
-export function renderPlanComment(plan: TestPlan, meta: CommentMeta): string {
+function renderCase(lines: string[], tc: TestCase, num: number, heading: string, withPriority: boolean) {
+  const priority = withPriority ? `  ·  ${PRIORITY_LABEL[tc.priority] ?? tc.priority}` : "";
+  lines.push(`${heading} ${num}. ${tc.title}${priority}`);
+  lines.push("");
+  lines.push(tc.description);
+  lines.push("");
+  lines.push("**Steps**");
+  tc.steps.forEach((s, j) => lines.push(`${j + 1}. ${s}`));
+  lines.push("");
+  lines.push(`**Expected:** ${tc.expected}`);
+  lines.push("");
+}
+
+export function renderPlanComment(
+  plan: TestPlan,
+  meta: CommentMeta,
+  style: CommentStyle = "flat",
+): string {
   const lines: string[] = [COMMENT_MARKER, "## 🧪 OxyQA test plan", "", plan.summary, ""];
 
-  plan.testCases.forEach((tc, i) => {
-    lines.push(`### ${i + 1}. ${tc.title}  ·  ${PRIORITY_LABEL[tc.priority] ?? tc.priority}`);
-    lines.push("");
-    lines.push(tc.description);
-    lines.push("");
-    lines.push("**Steps**");
-    tc.steps.forEach((s, j) => lines.push(`${j + 1}. ${s}`));
-    lines.push("");
-    lines.push(`**Expected:** ${tc.expected}`);
-    lines.push("");
-  });
+  if (style === "grouped") {
+    // Global numbers assigned in priority order so they read top-to-bottom.
+    let num = 0;
+    for (const priority of PRIORITY_ORDER) {
+      const cases = plan.testCases.filter((tc) => tc.priority === priority);
+      if (cases.length === 0) continue;
+      lines.push(`### ${PRIORITY_LABEL[priority]}`);
+      lines.push("");
+      for (const tc of cases) renderCase(lines, tc, ++num, "####", false);
+    }
+  } else {
+    plan.testCases.forEach((tc, i) => renderCase(lines, tc, i + 1, "###", true));
+  }
 
   lines.push("---");
   lines.push(

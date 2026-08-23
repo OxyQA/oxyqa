@@ -5,6 +5,7 @@
 import {
   COMMENT_MARKER,
   PR_QUEUE_NAME,
+  REPO_CONFIG_PATH,
   type PrJob,
   type RepoContentReader,
   createRedisConnection,
@@ -13,6 +14,7 @@ import {
   getConfig,
   loadRepoContext,
   renderPlanComment,
+  resolveRepoConfig,
 } from "@oxyqa/core";
 import { createDb, installations, plans, testCases, usage } from "@oxyqa/db";
 import { Worker } from "bullmq";
@@ -75,7 +77,24 @@ const worker = new Worker<PrJob>(
       .returning({ id: plans.id });
     const planId = planRow!.id;
 
-    // 1. Fetch PR metadata + diff.
+    // 1. Resolve behavior config: defaults ← repo .oxyqa/config.yml ← install
+    //    JSONB overrides. Bad config warns and falls back — never fails a plan.
+    const reader = makeContentReader(octokit, owner, repo);
+    const [installRow] = await db
+      .select({ config: installations.config })
+      .from(installations)
+      .where(eq(installations.id, installationId));
+    const repoYaml = await reader.readFile(REPO_CONFIG_PATH, headSha);
+    const { config: repoConfig, sources, warnings } = resolveRepoConfig({
+      repoYaml,
+      installOverrides: installRow?.config,
+    });
+    for (const w of warnings) log(`config warning: ${w}`);
+    log(
+      `config: ${sources.join("+")} (maxCases=${repoConfig.maxCases}, commentStyle=${repoConfig.commentStyle}, focusAreas=${repoConfig.focusAreas.length}, skipPaths=${repoConfig.skipPaths.length})`,
+    );
+
+    // 2. Fetch PR metadata + diff (skipPaths-filtered, budgeted).
     const { data: pr } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
     const { data: files } = await octokit.rest.pulls.listFiles({
       owner,
@@ -83,26 +102,29 @@ const worker = new Worker<PrJob>(
       pull_number: prNumber,
       per_page: 100,
     });
-    const diff = formatDiff(files);
-    log(`${files.length} files changed`);
+    const diff = formatDiff(files, { skipPaths: repoConfig.skipPaths });
+    log(
+      `${files.length} files changed, ${diff.included} in diff (${diff.skipped} skipped by config, ${diff.omitted} over budget)`,
+    );
 
-    // 2. Load repo context (.oxyqa/context.md → README fallback) at the PR head.
-    const repoContext = await loadRepoContext(makeContentReader(octokit, owner, repo), headSha);
+    // 3. Load repo context (.oxyqa/context.md → README fallback) at the PR head.
+    const repoContext = await loadRepoContext(reader, headSha);
     log(`context: ${repoContext.source}${repoContext.truncated ? " (truncated)" : ""}`);
 
-    // 3. Generate the test plan (provider-agnostic LLM call).
+    // 4. Generate the test plan (provider-agnostic LLM call).
     const { plan, promptVersion, usage: tokens } = await generateTestPlan(config.llm, {
       prTitle: pr.title,
       prBody: pr.body ?? undefined,
-      diff,
+      diff: diff.text,
       repoContext: repoContext.text,
+      behavior: { maxCases: repoConfig.maxCases, focusAreas: repoConfig.focusAreas },
     });
     log(
       `generated ${plan.testCases.length} test cases (${tokens.inputTokens}→${tokens.outputTokens} tok, cache read ${tokens.cacheReadInputTokens} / write ${tokens.cacheCreationInputTokens})`,
     );
 
-    // 4. Post or update the PR comment (idempotent via the hidden marker).
-    const body = renderPlanComment(plan, { headSha, promptVersion });
+    // 5. Post or update the PR comment (idempotent via the hidden marker).
+    const body = renderPlanComment(plan, { headSha, promptVersion }, repoConfig.commentStyle);
     const { data: comments } = await octokit.rest.issues.listComments({
       owner,
       repo,
@@ -126,7 +148,7 @@ const worker = new Worker<PrJob>(
       log(`posted comment ${commentId}`);
     }
 
-    // 5. Persist: plan status, test cases (replace on re-run), metered usage.
+    // 6. Persist: plan status, test cases (replace on re-run), metered usage.
     await db
       .update(plans)
       .set({ status: "posted", commentId, promptVersion, updatedAt: new Date() })

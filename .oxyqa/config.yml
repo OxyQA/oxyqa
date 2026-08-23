@@ -1,0 +1,12 @@
+# OxyQA behavior config for this repo (dogfood). Machine-readable knobs only —
+# prose context lives in context.md. Merge order: built-in defaults ← this file
+# ← per-install overrides. Docs: packages/core/src/repo-config.ts
+maxCases: 8
+focusAreas:
+  - multi-tenant isolation (every query scoped by installationId)
+  - webhook signature verification and head-SHA idempotency
+  - prompt-cache stability (the system prefix must stay byte-stable per repo)
+skipPaths:
+  - pnpm-lock.yaml
+  - packages/db/migrations/**
+commentStyle: grouped

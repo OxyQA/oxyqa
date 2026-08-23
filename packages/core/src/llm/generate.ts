@@ -4,7 +4,29 @@
 import { generateObject } from "ai";
 import { PROMPT_VERSION, buildTestPlanPrompt, type PromptInput } from "../prompt/build.js";
 import { type LlmConfig, resolveModel } from "./model.js";
-import { type TestPlan, testPlanSchema } from "./schema.js";
+import { type TestCase, type TestPlan, testPlanSchema } from "./schema.js";
+
+const PRIORITY_RANK: Record<TestCase["priority"], number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+};
+
+/** Backstop for RepoConfig.maxCases: the prompt asks for at most N, but if the
+ * model overshoots, keep the N highest-priority cases (preserving the model's
+ * original ordering among the kept ones). */
+function enforceMaxCases(plan: TestPlan, maxCases: number): TestPlan {
+  if (plan.testCases.length <= maxCases) return plan;
+  const keep = new Set(
+    plan.testCases
+      .map((tc, i) => ({ i, rank: PRIORITY_RANK[tc.priority] }))
+      .sort((a, b) => a.rank - b.rank || a.i - b.i)
+      .slice(0, maxCases)
+      .map((e) => e.i),
+  );
+  return { ...plan, testCases: plan.testCases.filter((_, i) => keep.has(i)) };
+}
 
 export interface GenerateResult {
   plan: TestPlan;
@@ -44,7 +66,7 @@ export async function generateTestPlan(llm: LlmConfig, input: PromptInput): Prom
     | undefined;
 
   return {
-    plan: object,
+    plan: input.behavior ? enforceMaxCases(object, input.behavior.maxCases) : object,
     promptVersion: PROMPT_VERSION,
     usage: {
       inputTokens: usage.promptTokens ?? 0,
