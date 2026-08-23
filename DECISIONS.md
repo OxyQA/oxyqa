@@ -128,6 +128,15 @@ Prose context stays in `context.md`. Per-install overrides live in the existing
 
 ## 8. Deliberately deferred (with revisit triggers)
 
+- **Auto-generated repo context (first-run bootstrap)** *(user, 2026-08-22)* —
+  when a repo has no `.oxyqa/context.md`, generate a starter one from repo
+  signals (README, file tree, test dirs, manifests) instead of relying on the
+  bare README excerpt. Two candidate shapes, pick at build time: (a) worker-side
+  behind a config toggle, or (b) a dashboard onboarding step (Phase 5) that
+  opens a PR adding the drafted file — PR form preferred so the team reviews
+  and owns the content. Costs an extra LLM call, so it must respect free-tier
+  gating. Trigger: Phase 5 onboarding build, or earlier if README-fallback
+  plan quality proves weak in beta.
 - **Jira/Xray** — trigger: first enterprise team asks.
 - **Executable test generation** — trigger: checklist edit-rate measured & good.
 - **Prod environment (Railway env #2, `oxyqa-prod` Supabase paid, fixed-Pro
