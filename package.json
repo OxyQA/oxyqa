@@ -2,7 +2,7 @@
   "name": "oxyqa",
   "version": "0.0.0",
   "private": true,
-  "description": "OxyQA — AI QA test plans from your PR diffs. Multi-tenant cloud SaaS and single-tenant self-hosted from one codebase.",
+  "description": "OxyQA \u2014 AI QA test plans from your PR diffs. Multi-tenant cloud SaaS and single-tenant self-hosted from one codebase.",
   "packageManager": "pnpm@9.12.0",
   "engines": {
     "node": ">=20"
@@ -19,7 +19,8 @@
     "@types/node": "^22.9.0",
     "tsx": "^4.19.2",
     "turbo": "^2.1.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "@electric-sql/pglite": "^0.5.8"
   },
   "pnpm": {
     "overrides": {

@@ -4,6 +4,7 @@
 import { relations } from "drizzle-orm";
 import {
   bigint,
+  boolean,
   index,
   integer,
   jsonb,
@@ -27,7 +28,26 @@ export const installations = pgTable("installations", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });
 
-/** One generated QA test plan per (repo, head SHA). Idempotency key lives here. */
+/** Explicit maintainer guidance, isolated by installation and repository. */
+export const repoMemories = pgTable("repo_memories", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  installationId: bigint("installation_id", { mode: "number" }).notNull()
+    .references(() => installations.id, { onDelete: "cascade" }),
+  owner: text("owner").notNull(),
+  repo: text("repo").notNull(),
+  content: text("content").notNull(),
+  source: text("source").notNull().default("command"),
+  createdBy: text("created_by").notNull(),
+  // Makes replay/retry of remember idempotent, even after queue retention expires.
+  sourceCommentId: bigint("source_comment_id", { mode: "number" }),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => ({
+  byRepo: index("repo_memories_repo_idx").on(t.installationId, t.owner, t.repo, t.active),
+  byCommand: uniqueIndex("repo_memories_command_uniq").on(t.installationId, t.sourceCommentId),
+}));
+
+/** One generated QA test plan per (installation, repository, PR, head SHA). Idempotency key lives here. */
 export const plans = pgTable(
   "plans",
   {
@@ -39,7 +59,7 @@ export const plans = pgTable(
     repo: text("repo").notNull(),
     prNumber: integer("pr_number").notNull(),
     headSha: text("head_sha").notNull(),
-    status: text("status").notNull().default("queued"), // queued | processing | posted | failed
+    status: text("status").notNull().default("queued"), // queued | processing | posted | failed | superseded
     promptVersion: text("prompt_version"),
     commentId: bigint("comment_id", { mode: "number" }), // GitHub PR comment id, for update-in-place
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -47,7 +67,7 @@ export const plans = pgTable(
   },
   (t) => ({
     // Idempotency: one plan per repo per head SHA. Re-fired events update, not duplicate.
-    uniqPlan: uniqueIndex("plans_install_repo_sha_uniq").on(t.installationId, t.repo, t.headSha),
+    uniqPlan: uniqueIndex("plans_install_repo_sha_uniq").on(t.installationId, t.owner, t.repo, t.prNumber, t.headSha),
     byInstall: index("plans_installation_idx").on(t.installationId),
   }),
 );

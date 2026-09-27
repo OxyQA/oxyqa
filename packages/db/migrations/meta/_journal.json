@@ -8,6 +8,20 @@
       "when": 1784433414950,
       "tag": "0000_past_black_widow",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1790476507018,
+      "tag": "0001_hard_killer_shrike",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1790476808276,
+      "tag": "0002_loose_marvex",
+      "breakpoints": true
     }
   ]
 }

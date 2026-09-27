@@ -10,9 +10,9 @@ Companions: `README.md` (vision/roadmap) · `DEPLOY.md` (env runbook) ·
 
 ---
 
-## 0. Resume state — staging is LIVE; building Phase 2
+## 0. Resume state — Phase 2 implemented; live verification blocked
 
-Staging deploy completed 2026-08-22: webhook `/health` green at
+Historical staging verification (2026-08-22): webhook `/health` green at
 `oxyqawebhook-staging.up.railway.app`; worker migrated and consuming; GitHub App
 `oxyqa-staging` installed on `OxyQA/oxyqa`; dogfood verified (staging bot posted
 a test plan on PR #3). Merge to `main` auto-deploys staging.
@@ -21,7 +21,18 @@ Current build: **Phase 2 context enrichment (§3)**, sliced as three PRs —
 (1) ✅ repo context (`.oxyqa/context.md` / README) + prompt-caching restructure,
 (2) ✅ `.oxyqa/config.yml` behavior knobs (defaults ← yml ← install JSONB;
 prompt v3; this repo dogfoods `commentStyle: grouped`),
-(3) reply-to-agent + repo memories (§4) — next.
+(3) implemented on `codex/phase2-reply-memory`: reply commands, scoped memories,
+    prompt v4, migrations, and offline tests. Live dogfood is pending.
+
+2026-09-26: PR #5 merged. User cancelled some paid plans during development;
+continue without reactivating subscriptions. After the merge, Railway reports
+webhook SUCCESS and worker CRASHED; the worker fails before starting because
+Supabase returns `ENOTFOUND: tenant/user ... not found` during `db:migrate`.
+Do not assume staging is healthy. Offline development is supported by `pnpm test`
+(embedded PostgreSQL, stubbed GitHub/model; no hosted DB, Redis, or paid LLM calls).
+Restore/replace the staging database only when live validation is wanted; then
+verify grouped output, command acknowledgments, memories and regeneration.
+Next feature work: §5 install lifecycle and final-failure UX, then §6 integrations.
 
 Guided-setup style that worked: agent gives exact dashboard steps + verifies
 each credential via API before moving on; **secrets never pasted into chat**
@@ -79,7 +90,7 @@ Prose context stays in `context.md`. Per-install overrides live in the existing
 
 ## 4. Reply-to-agent + repo memory spec (events already subscribed)
 
-- **Trigger:** `issue_comment.created` on PRs, body mentions the app's own slug
+- **Trigger:** `issue_comment.created` on PRs, body starts with the app's own mention
   (resolve slug at boot via `GET /app`, works for dev/staging/prod alike).
 - **Authorization:** only commenters with repo write/admin (check permission via
   API); ignore all bots.
@@ -87,7 +98,14 @@ Prose context stays in `context.md`. Per-install overrides live in the existing
   current head SHA, bypassing dedup) · `focus: <areas>` (one-shot regenerate
   with emphasis). Unknown → short help reply.
 - **Storage:** new table `repo_memories` (id, installation_id, owner, repo,
-  content, source `command|inferred`, created_by, active, created_at).
+  content, source `command|inferred`, created_by, active, created_at, source_comment_id).
+  `source_comment_id` deduplicates remembered guidance on replay. Only explicit
+  command memories are created now; inference remains future work.
+- **Limits:** remember/forget input ≤2,000 characters; focus ≤1,000. Forget
+  matches literal text case-insensitively, within the installation/owner/repo.
+  Latest 20 active memories fit a ~2k-token prompt budget.
+- **Regeneration:** new comment = new run at the current open, non-draft head.
+  Same-comment retries share a queue ID. Focus lives only in that job/prompt tail.
 - **Ack:** reply comment via existing PR-comment write. (👍-reaction ack needs
   Issues:write — deferred deliberately; Issues stays read-only until Phase 3a.)
 

@@ -9,7 +9,8 @@
     "build": "tsc -p tsconfig.json",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist .turbo *.tsbuildinfo"
+    "clean": "rm -rf dist .turbo *.tsbuildinfo",
+    "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
@@ -18,6 +19,7 @@
     "@oxyqa/db": "workspace:*",
     "hono": "^4.6.12",
     "tsx": "^4.19.2",
-    "zod": "^3.23.8"
+    "zod": "^3.23.8",
+    "octokit": "^4.0.2"
   }
 }

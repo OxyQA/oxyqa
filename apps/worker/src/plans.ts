@@ -1,0 +1,156 @@
+import {
+  COMMENT_MARKER, REPO_CONFIG_PATH, formatRepoMemories, formatDiff,
+  loadRepoContext, renderPlanComment, resolveRepoConfig,
+  type PrJob, type RepoContentReader, type PromptInput, type GenerateResult,
+} from "@oxyqa/core";
+import { installations, plans, testCases, usage, type Database } from "@oxyqa/db";
+import { eq, sql } from "drizzle-orm";
+import type { Octokit } from "octokit";
+import { createMemoryStore } from "./memories.js";
+import { writeBotComment } from "./github-comments.js";
+
+// Adapts an installation Octokit onto core's minimal read surface so the
+// context loader stays GitHub-client-agnostic.
+function makeContentReader(octokit: Octokit, owner: string, repo: string): RepoContentReader {
+  const is404 = (err: unknown) => (err as { status?: number }).status === 404;
+  return {
+    async readFile(path, ref) {
+      try {
+        const { data } = await octokit.rest.repos.getContent({ owner, repo, path, ref });
+        if (Array.isArray(data) || data.type !== "file") return null;
+        return Buffer.from(data.content, "base64").toString("utf8");
+      } catch (err) {
+        if (is404(err)) return null;
+        throw err;
+      }
+    },
+    async readReadme(ref) {
+      try {
+        const { data } = await octokit.rest.repos.getReadme({ owner, repo, ref });
+        return Buffer.from(data.content, "base64").toString("utf8");
+      } catch (err) {
+        if (is404(err)) return null;
+        throw err;
+      }
+    },
+  };
+}
+
+export interface PlanDependencies {
+  db: Database;
+  octokit: Octokit;
+  slug: string;
+  model: string;
+  generate(input: PromptInput): Promise<GenerateResult>;
+}
+
+/** All external boundaries are injected so the full flow can run offline. */
+export async function processPlan(job: PrJob, { db, octokit, slug, model, generate }: PlanDependencies) {
+  const memories = createMemoryStore(db);
+  const { installationId, owner, repo, prNumber, headSha, oneShotFocus } = job;
+  const log = (msg: string) => console.log(`[oxyqa-worker] PR #${prNumber} — ${msg}`);
+  log(`start (${owner}/${repo}@${headSha.slice(0, 7)})`);
+
+  // The runtime ensures the installation exists before entering this handler.
+  const { data: pr } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
+  if (pr.head.sha !== headSha || pr.state !== "open" || pr.draft) return { skipped: "stale or closed PR" };
+  const [planRow] = await db
+    .insert(plans)
+    .values({ installationId, owner, repo, prNumber, headSha, status: "processing" })
+    .onConflictDoUpdate({
+      target: [plans.installationId, plans.owner, plans.repo, plans.prNumber, plans.headSha],
+      set: { status: "processing", updatedAt: new Date() },
+    })
+    .returning({ id: plans.id });
+  const planId = planRow!.id;
+
+  // 1. Resolve behavior config: defaults ← repo .oxyqa/config.yml ← install
+  //    JSONB overrides. Bad config warns and falls back — never fails a plan.
+  const reader = makeContentReader(octokit, owner, repo);
+  const [installRow] = await db
+    .select({ config: installations.config })
+    .from(installations)
+    .where(eq(installations.id, installationId));
+  const repoYaml = await reader.readFile(REPO_CONFIG_PATH, headSha);
+  const { config: repoConfig, sources, warnings } = resolveRepoConfig({
+    repoYaml,
+    installOverrides: installRow?.config,
+  });
+  for (const w of warnings) log(`config warning: ${w}`);
+  log(
+    `config: ${sources.join("+")} (maxCases=${repoConfig.maxCases}, commentStyle=${repoConfig.commentStyle}, focusAreas=${repoConfig.focusAreas.length}, skipPaths=${repoConfig.skipPaths.length})`,
+  );
+
+  // 2. Fetch PR metadata + diff (skipPaths-filtered, budgeted).
+  const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
+    owner,
+    repo,
+    pull_number: prNumber,
+    per_page: 100,
+  });
+  const diff = formatDiff(files, { skipPaths: repoConfig.skipPaths });
+  log(
+    `${files.length} files changed, ${diff.included} in diff (${diff.skipped} skipped by config, ${diff.omitted} over budget)`,
+  );
+
+  // 3. Load repo context (.oxyqa/context.md → README fallback) at the PR head.
+  const repoContext = await loadRepoContext(reader, headSha);
+  log(`context: ${repoContext.source}${repoContext.truncated ? " (truncated)" : ""}`);
+
+  // 4. Generate the test plan (provider-agnostic LLM call).
+  const { plan, promptVersion, usage: tokens } = await generate({
+    prTitle: pr.title,
+    prBody: pr.body ?? undefined,
+    diff: diff.text,
+    repoContext: repoContext.text,
+    repoMemories: formatRepoMemories(await memories.load({ installationId, owner, repo })),
+    oneShotFocus,
+    behavior: { maxCases: repoConfig.maxCases, focusAreas: repoConfig.focusAreas },
+  });
+  log(
+    `generated ${plan.testCases.length} test cases (${tokens.inputTokens}→${tokens.outputTokens} tok, cache read ${tokens.cacheReadInputTokens} / write ${tokens.cacheCreationInputTokens})`,
+  );
+
+  await db.insert(usage).values({
+    installationId,
+    repo,
+    prNumber,
+    model,
+    inputTokens: tokens.inputTokens,
+    outputTokens: tokens.outputTokens,
+  });
+
+  // 5. Post or update the PR comment (idempotent via the hidden marker).
+  const body = renderPlanComment(plan, { headSha, promptVersion }, repoConfig.commentStyle);
+  // Serialize publication per PR (including different head SHAs). Concurrent
+  // regenerate jobs must not create duplicate comments or interleave case replacement.
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`${installationId}/${owner.toLowerCase()}/${repo.toLowerCase()}#${prNumber}`}, 0))`);
+    const { data: latest } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
+    if (latest.head.sha !== headSha || latest.state !== "open" || latest.draft) {
+      await tx.update(plans).set({ status: "superseded", updatedAt: new Date() }).where(eq(plans.id, planId));
+      return { skipped: "PR changed during generation" };
+    }
+    const commentId = await writeBotComment(octokit, { owner, repo, prNumber }, slug, COMMENT_MARKER, body);
+    log(`posted plan comment ${commentId}`);
+
+    // 6. Atomically persist plan status and replace its cases on regeneration.
+    await tx
+      .update(plans)
+      .set({ status: "posted", commentId, promptVersion, updatedAt: new Date() })
+      .where(eq(plans.id, planId));
+    await tx.delete(testCases).where(eq(testCases.planId, planId));
+    await tx.insert(testCases).values(
+      plan.testCases.map((tc) => ({
+        planId,
+        title: tc.title,
+        description: tc.description,
+        steps: tc.steps,
+        expected: tc.expected,
+        priority: tc.priority,
+      })),
+    );
+
+    return { testCases: plan.testCases.length, commentId };
+  });
+}
