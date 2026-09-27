@@ -18,8 +18,10 @@ Staging deploy completed 2026-08-22: webhook `/health` green at
 a test plan on PR #3). Merge to `main` auto-deploys staging.
 
 Current build: **Phase 2 context enrichment (§3)**, sliced as three PRs —
-(1) repo context (`.oxyqa/context.md` / README) + prompt-caching restructure,
-(2) `.oxyqa/config.yml` behavior knobs, (3) reply-to-agent + repo memories (§4).
+(1) ✅ repo context (`.oxyqa/context.md` / README) + prompt-caching restructure,
+(2) ✅ `.oxyqa/config.yml` behavior knobs (defaults ← yml ← install JSONB;
+prompt v3; this repo dogfoods `commentStyle: grouped`),
+(3) reply-to-agent + repo memories (§4) — next.
 
 Guided-setup style that worked: agent gives exact dashboard steps + verifies
 each credential via API before moving on; **secrets never pasted into chat**

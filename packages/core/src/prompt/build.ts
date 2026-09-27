@@ -8,7 +8,16 @@
 // diff) goes in `prompt`, after the breakpoint. Don't move repo context into
 // the prompt: any byte before the breakpoint that varies per-PR kills caching.
 
-export const PROMPT_VERSION = "v2";
+export const PROMPT_VERSION = "v3";
+
+export interface PromptBehavior {
+  /** Upper bound on test cases (see repo-config.ts; also enforced post-generation). */
+  maxCases: number;
+  /** Team-configured emphasis areas. Stable per-repo — part of the cached prefix.
+   * (The one-shot `focus:` command in Phase 2 PR 3 must inject into `prompt`
+   * instead, so it doesn't invalidate the cache.) */
+  focusAreas: string[];
+}
 
 export interface PromptInput {
   prTitle: string;
@@ -18,6 +27,9 @@ export interface PromptInput {
   /** Repo-level context: .oxyqa/context.md or README excerpt (see context/repo.ts).
    * Stable per-repo — becomes part of the cached prompt prefix. */
   repoContext?: string;
+  /** Behavior knobs from resolved repo config. Stable per-repo (yml + install
+   * overrides), so this also lives in the cached prefix. */
+  behavior?: PromptBehavior;
 }
 
 const SYSTEM = `You are a senior QA engineer writing a focused test plan for a pull request.
@@ -35,6 +47,12 @@ export function buildTestPlanPrompt(input: PromptInput): { system: string; promp
   let system = SYSTEM;
   if (input.repoContext?.trim()) {
     system += `\n\n## Repository context\n\nTeam-provided knowledge about this repository — domain terms, testing conventions, and constraints. Always honor these when writing test cases:\n\n${input.repoContext.trim()}`;
+  }
+  if (input.behavior) {
+    system += `\n\n## Plan constraints\n\n- Include at most ${input.behavior.maxCases} test cases; fewer is fine when the change is small.`;
+    if (input.behavior.focusAreas.length > 0) {
+      system += `\n- The team asked for extra attention on these areas — weight them when choosing and prioritizing cases:\n${input.behavior.focusAreas.map((a) => `  - ${a}`).join("\n")}`;
+    }
   }
 
   const parts: string[] = [];
