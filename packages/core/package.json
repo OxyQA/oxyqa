@@ -14,7 +14,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist .turbo *.tsbuildinfo"
+    "clean": "rm -rf dist .turbo *.tsbuildinfo",
+    "test": "node --import tsx --test test/*.test.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.5",

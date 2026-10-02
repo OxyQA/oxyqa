@@ -32,10 +32,11 @@ oxyqa/
 └── tsconfig.base.json
 ```
 
-> **Status:** Phases 0–1 are built and running — the full loop (webhook → queue
-> → worker → LLM → PR comment → persistence) is verified on real PRs, deployed
-> to staging on Railway, and dogfooding on this repo's own pull requests. See
-> [DECISIONS.md](DECISIONS.md) for standing decisions and current phase specs.
+> **Status:** Phases 0–1 and Phase 2 repo context/configuration are built;
+> reply commands and repository memory are implemented on the Phase 2 PR 3 branch.
+> The core loop was verified on staging, but live validation is currently blocked
+> by an unavailable staging database. Offline tests do not need hosted services.
+> See [DECISIONS.md](DECISIONS.md) for the current resume state.
 
 ## Tech stack
 
@@ -76,6 +77,42 @@ pnpm --filter @oxyqa/worker dev
 pnpm --filter @oxyqa/webhook dev
 npx smee -u <smee-url> -t http://localhost:3001/webhooks/github
 ```
+
+## Develop without paid services
+
+After installing dependencies, these checks need no credentials, hosted database,
+Redis, GitHub App, or LLM API calls:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm test
+pnpm typecheck
+pnpm build
+```
+
+Tests run migrations and the plan pipeline against embedded PostgreSQL (PGlite),
+with GitHub and model responses stubbed. CI runs the same tests. The full live
+bot still needs Postgres, Redis, a GitHub App, and a configured model provider;
+only run the worker or `generate:sample` when intentionally testing those services.
+
+## Reply to the bot
+
+On a PR, start a new comment with your app's mention (for example,
+`@oxyqa-staging`). Only repository collaborators with write/admin access can
+run commands. Bots, edited comments, and ordinary GitHub Issues are ignored.
+
+| Command | Effect |
+|---|---|
+| `@oxyqa-staging remember: Always test Safari` | Save guidance for future plans in this repository |
+| `@oxyqa-staging forget Safari` | Deactivate memories containing that literal text, case-insensitively |
+| `@oxyqa-staging regenerate` | Regenerate the current open, non-draft PR head and update the plan comment |
+| `@oxyqa-staging focus: accessibility` | Regenerate with one-time emphasis, without changing saved guidance |
+
+The app resolves its own slug at startup, so use the dev/staging/prod bot's actual
+mention. Remember/forget inputs allow 2,000 characters; focus allows 1,000. Unknown
+commands return help. Memories are scoped to installation + owner + repository;
+the latest 20 active memories enter the prompt within a ~2k-token budget. Use
+regenerate after remembering or forgetting to apply the change to an existing plan.
 
 ## Build order (from the roadmap)
 

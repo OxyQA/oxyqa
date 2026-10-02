@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS "plans_install_repo_sha_uniq";--> statement-breakpoint
+CREATE UNIQUE INDEX IF NOT EXISTS "plans_install_repo_sha_uniq" ON "plans" USING btree ("installation_id","owner","repo","pr_number","head_sha");

@@ -11,6 +11,9 @@ importers:
 
   .:
     devDependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.5.8
+        version: 0.5.8
       '@types/node':
         specifier: ^22.9.0
         version: 22.20.0
@@ -43,6 +46,9 @@ importers:
       hono:
         specifier: ^4.6.12
         version: 4.12.28
+      octokit:
+        specifier: ^4.0.2
+        version: 4.1.4
       tsx:
         specifier: ^4.19.2
         version: 4.23.0
@@ -75,7 +81,7 @@ importers:
         version: 16.6.1
       drizzle-orm:
         specifier: ^0.36.4
-        version: 0.36.4(@opentelemetry/api@1.9.0)(postgres@3.4.9)(react@19.2.7)
+        version: 0.36.4(@electric-sql/pglite@0.5.8)(@opentelemetry/api@1.9.0)(postgres@3.4.9)(react@19.2.7)
       octokit:
         specifier: ^4.0.2
         version: 4.1.4
@@ -124,7 +130,7 @@ importers:
     dependencies:
       drizzle-orm:
         specifier: ^0.36.4
-        version: 0.36.4(@opentelemetry/api@1.9.0)(postgres@3.4.9)(react@19.2.7)
+        version: 0.36.4(@electric-sql/pglite@0.5.8)(@opentelemetry/api@1.9.0)(postgres@3.4.9)(react@19.2.7)
       postgres:
         specifier: ^3.4.5
         version: 3.4.9
@@ -172,6 +178,9 @@ packages:
 
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
+
+  '@electric-sql/pglite@0.5.8':
+    resolution: {integrity: sha512-n9tsbUOhwx2epK1V0ZG9Ar4SHWUju04dhmzZXiSBXwBoleOvIfals33NAaWgagQVAL4Rbvx/Ptsu3P+pA09f6Q==}
 
   '@esbuild-kit/core-utils@3.3.2':
     resolution: {integrity: sha512-sPRAnw9CdSsRmEtnsl2WXWdyquogVpB3yZ3dgwJfe8zrOzTsV7cJvmwrKVa+0ma5BoiGJ+BoqkMvawbayKUsqQ==}
@@ -1180,6 +1189,8 @@ snapshots:
 
   '@drizzle-team/brocli@0.10.2': {}
 
+  '@electric-sql/pglite@0.5.8': {}
+
   '@esbuild-kit/core-utils@3.3.2':
     dependencies:
       esbuild: 0.18.20
@@ -1665,8 +1676,9 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  drizzle-orm@0.36.4(@opentelemetry/api@1.9.0)(postgres@3.4.9)(react@19.2.7):
+  drizzle-orm@0.36.4(@electric-sql/pglite@0.5.8)(@opentelemetry/api@1.9.0)(postgres@3.4.9)(react@19.2.7):
     optionalDependencies:
+      '@electric-sql/pglite': 0.5.8
       '@opentelemetry/api': 1.9.0
       postgres: 3.4.9
       react: 19.2.7
