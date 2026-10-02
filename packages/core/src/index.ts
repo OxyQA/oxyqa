@@ -9,6 +9,7 @@
 //   - output      PR-comment renderer (update-in-place marker) + final-failure banner
 //   - context     Phase 2: .oxyqa/context.md / README and repo memories, budgeted
 //   - commands    explicit reply-to-agent command parsing
+//   - limits      free-tier gating: per-install monthly plan cap
 //   - repo-config Phase 2: .oxyqa/config.yml behavior knobs (defaults ← yml ← install)
 //
 // Planned (Phase 2+):
@@ -16,6 +17,7 @@
 //   - integrations/ Linear push (Jira/Xray deferred)
 export * from "./config.js";
 export * from "./repo-config.js";
+export * from "./limits.js";
 export * from "./queue.js";
 export * from "./commands.js";
 export * from "./context/memories.js";

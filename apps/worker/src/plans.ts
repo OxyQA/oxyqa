@@ -1,10 +1,11 @@
 import {
   COMMENT_MARKER, REPO_CONFIG_PATH, describeFailure, formatRepoMemories, formatDiff,
-  loadRepoContext, renderFailureComment, renderPlanComment, resolveRepoConfig,
+  loadRepoContext, monthWindow, renderFailureComment, renderLimitComment, renderPlanComment,
+  resolveMonthlyPlanLimit, resolveRepoConfig,
   type PrJob, type RepoContentReader, type PromptInput, type GenerateResult,
 } from "@oxyqa/core";
 import { installations, plans, testCases, usage, type Database } from "@oxyqa/db";
-import { and, eq, sql } from "drizzle-orm";
+import { and, count, eq, gte, sql } from "drizzle-orm";
 import type { Octokit } from "octokit";
 import { createMemoryStore } from "./memories.js";
 import { findBotComment, writeBotComment } from "./github-comments.js";
@@ -55,10 +56,13 @@ export interface PlanDependencies {
   slug: string;
   model: string;
   generate(input: PromptInput): Promise<GenerateResult>;
+  /** Cloud installs are capped per month; self-hosted is unlimited. Defaults to cloud. */
+  mode?: "cloud" | "self-hosted";
+  now?: () => Date;
 }
 
 /** All external boundaries are injected so the full flow can run offline. */
-export async function processPlan(job: PrJob, { db, octokit, slug, model, generate }: PlanDependencies) {
+export async function processPlan(job: PrJob, { db, octokit, slug, model, generate, mode = "cloud", now = () => new Date() }: PlanDependencies) {
   const memories = createMemoryStore(db);
   const { installationId, owner, repo, prNumber, headSha, oneShotFocus } = job;
   const log = (msg: string) => console.log(`[oxyqa-worker] PR #${prNumber} — ${msg}`);
@@ -94,7 +98,28 @@ export async function processPlan(job: PrJob, { db, octokit, slug, model, genera
     `config: ${sources.join("+")} (maxCases=${repoConfig.maxCases}, commentStyle=${repoConfig.commentStyle}, focusAreas=${repoConfig.focusAreas.length}, skipPaths=${repoConfig.skipPaths.length})`,
   );
 
-  // 2. Fetch PR metadata + diff (skipPaths-filtered, budgeted).
+  // 2. Free-tier gate, before any LLM spend. A soft cap: concurrent jobs can
+  //    overshoot by at most the worker concurrency.
+  const limit = resolveMonthlyPlanLimit(mode, installRow?.config);
+  if (limit !== null) {
+    const { start, resetsAt } = monthWindow(now());
+    const [used] = await db.select({ n: count() }).from(usage)
+      .where(and(eq(usage.installationId, installationId), gte(usage.createdAt, start)));
+    if ((used?.n ?? 0) >= limit) {
+      log(`monthly limit reached (${used?.n}/${limit}) — skipping generation`);
+      return db.transaction(async (tx) => {
+        await lockPullRequest(tx, job);
+        const scope = { owner, repo, prNumber };
+        const existing = await findBotComment(octokit, scope, slug, COMMENT_MARKER);
+        const body = renderLimitComment(existing?.body ?? null, { limit, resetsAt, headSha, slug });
+        const commentId = await writeBotComment(octokit, scope, slug, COMMENT_MARKER, body, existing?.id);
+        await tx.update(plans).set({ status: "limited", updatedAt: new Date() }).where(eq(plans.id, planId));
+        return { skipped: "monthly plan limit reached", commentId };
+      });
+    }
+  }
+
+  // 3. Fetch PR metadata + diff (skipPaths-filtered, budgeted).
   const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
     owner,
     repo,
@@ -106,11 +131,11 @@ export async function processPlan(job: PrJob, { db, octokit, slug, model, genera
     `${files.length} files changed, ${diff.included} in diff (${diff.skipped} skipped by config, ${diff.omitted} over budget)`,
   );
 
-  // 3. Load repo context (.oxyqa/context.md → README fallback) at the PR head.
+  // 4. Load repo context (.oxyqa/context.md → README fallback) at the PR head.
   const repoContext = await loadRepoContext(reader, headSha);
   log(`context: ${repoContext.source}${repoContext.truncated ? " (truncated)" : ""}`);
 
-  // 4. Generate the test plan (provider-agnostic LLM call).
+  // 5. Generate the test plan (provider-agnostic LLM call).
   const { plan, promptVersion, usage: tokens } = await generate({
     prTitle: pr.title,
     prBody: pr.body ?? undefined,
@@ -133,7 +158,7 @@ export async function processPlan(job: PrJob, { db, octokit, slug, model, genera
     outputTokens: tokens.outputTokens,
   });
 
-  // 5. Post or update the PR comment (idempotent via the hidden marker).
+  // 6. Post or update the PR comment (idempotent via the hidden marker).
   const body = renderPlanComment(plan, { headSha, promptVersion }, repoConfig.commentStyle);
   // Concurrent regenerate jobs must not create duplicate comments or interleave case replacement.
   return db.transaction(async (tx) => {
@@ -146,7 +171,7 @@ export async function processPlan(job: PrJob, { db, octokit, slug, model, genera
     const commentId = await writeBotComment(octokit, { owner, repo, prNumber }, slug, COMMENT_MARKER, body);
     log(`posted plan comment ${commentId}`);
 
-    // 6. Atomically persist plan status and replace its cases on regeneration.
+    // 7. Atomically persist plan status and replace its cases on regeneration.
     await tx
       .update(plans)
       .set({ status: "posted", commentId, promptVersion, updatedAt: new Date() })

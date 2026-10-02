@@ -45,7 +45,7 @@ each credential via API before moving on; **secrets never pasted into chat**
 | First users / ICP | **Indie & startup teams** (small eng teams, no dedicated QA) | Linear over Jira; light compliance urgency; low-friction pricing; GitHub-native UX is the product's home |
 | Integration order | **GitHub Issues first, then Linear.** Jira/Xray only on real enterprise pull | Phase 3a = GitHub-native, 3b = Linear; Xray drops out of near-term scope |
 | Output mode | **Human-runnable checklist is the core product; executable tests (Playwright first) come later as opt-in premium** — only after checklist quality is proven via edit-rate/feedback | Phase 2 optimizes checklist quality; no exec-test work before quality metrics exist |
-| First revenue | **GitHub Marketplace freemium** (free tier + paid). Self-hosted stays the architecture principle from day one but becomes the *premium tier later*, not the first sale | Phase 5 = Marketplace billing; Stripe/license-key work deferred to the self-hosted tier |
+| First revenue | **GitHub Marketplace freemium** (free tier + paid). Self-hosted stays the architecture principle from day one but becomes the *premium tier later*, not the first sale | Phase 5 = Marketplace billing; Stripe/license-key work deferred to the self-hosted tier. **Constraint found 2026-10-02:** paid Marketplace plans require a verified publisher (org 2FA + verified domain) **and ≥100 installs**; a free listing needs only a privacy policy + support contact. So the sequence is direct install link → free listing → paid plans after 100 installs (or bill directly via Stripe sooner — user call when it matters) |
 
 ## 2. Standing conventions (decided, in force now)
 
@@ -134,9 +134,16 @@ Prose context stays in `context.md`. Per-install overrides live in the existing
 3. **Observability:** Sentry (free tier) in both services at first external
    user; Langfuse **Cloud** free tier during beta (self-host it only when the
    self-hosted product tier ships). Structured logging (pino) is low priority.
-4. **Free-tier gating:** enforce in worker pre-LLM — count plans per
-   installation per calendar month; initial cap **50 plans/mo** (constant, per-
-   install override via config JSONB). Build alongside Phase 5.
+4. **Free-tier gating:** enforced in the worker pre-LLM. Counts `usage` rows
+   (every model run, including regenerations) per installation per **UTC
+   calendar month**; default cap **50/mo** (`FREE_MONTHLY_PLAN_LIMIT`).
+   Override per install via `installations.config.monthlyPlanLimit`
+   (non-negative integer, or `"unlimited"`); invalid values fall back to the
+   default, and the key is **not** a repo-yml knob (tenants can't raise their
+   own cap). `OXYQA_MODE=self-hosted` is uncapped. Over the cap: no model call,
+   plan `status=limited`, and a `[!NOTE]` notice with the reset date on the
+   plan comment. Soft cap — concurrent jobs can overshoot by up to the worker
+   concurrency (5). Set the dogfood install on staging to `"unlimited"`.
 
 ## 5a. MVP gate — "outside teams can install it" *(proposed 2026-10-02, pending user OK)*
 

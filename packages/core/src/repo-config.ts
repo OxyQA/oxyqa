@@ -10,6 +10,7 @@
 // invalid value falls back to the layer below it with a warning the worker logs.
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
+import { MONTHLY_PLAN_LIMIT_KEY } from "./limits.js";
 
 export const REPO_CONFIG_PATH = ".oxyqa/config.yml";
 
@@ -51,6 +52,9 @@ const FIELD_SCHEMAS = {
 
 const KNOWN_KEYS = Object.keys(FIELD_SCHEMAS) as (keyof RepoConfig)[];
 
+/** Install-level settings read elsewhere; valid in the install layer only. */
+const INSTALL_ONLY_KEYS: string[] = [MONTHLY_PLAN_LIMIT_KEY];
+
 export interface ResolvedRepoConfig {
   config: RepoConfig;
   /** Layers that contributed at least one valid field, for the worker log. */
@@ -69,12 +73,13 @@ function applyLayer(
   raw: Record<string, unknown>,
   layer: string,
   warnings: string[],
+  alsoAllowed: string[] = [],
 ): { config: RepoConfig; contributed: boolean } {
   const config = { ...base };
   let contributed = false;
 
   for (const key of Object.keys(raw)) {
-    if (!(KNOWN_KEYS as string[]).includes(key)) {
+    if (!(KNOWN_KEYS as string[]).includes(key) && !alsoAllowed.includes(key)) {
       warnings.push(`${layer}: unknown key "${key}" ignored (known: ${KNOWN_KEYS.join(", ")})`);
     }
   }
@@ -134,7 +139,7 @@ export function resolveRepoConfig(input: {
   }
 
   if (input.installOverrides && isPlainObject(input.installOverrides)) {
-    const applied = applyLayer(config, input.installOverrides, "install config", warnings);
+    const applied = applyLayer(config, input.installOverrides, "install config", warnings, INSTALL_ONLY_KEYS);
     config = applied.config;
     if (applied.contributed) sources.push("install");
   }

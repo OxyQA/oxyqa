@@ -62,7 +62,7 @@ export const plans = pgTable(
     repo: text("repo").notNull(),
     prNumber: integer("pr_number").notNull(),
     headSha: text("head_sha").notNull(),
-    status: text("status").notNull().default("queued"), // queued | processing | posted | failed | superseded
+    status: text("status").notNull().default("queued"), // queued | processing | posted | failed | superseded | limited
     promptVersion: text("prompt_version"),
     commentId: bigint("comment_id", { mode: "number" }), // GitHub PR comment id, for update-in-place
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),

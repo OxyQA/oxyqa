@@ -70,7 +70,7 @@ const worker = new Worker<OxyqaJob>(
     const octokit = await githubApp.getInstallationOctokit(plan.installationId);
     try {
       return await processPlan(plan, {
-        db, octokit, slug, model: config.llm.model, generate: (input) => generateTestPlan(config.llm, input),
+        db, octokit, slug, mode: config.mode, model: config.llm.model, generate: (input) => generateTestPlan(config.llm, input),
       });
     } catch (err) {
       // attemptsMade counts earlier failures while this attempt is still running.

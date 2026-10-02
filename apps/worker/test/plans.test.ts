@@ -146,3 +146,60 @@ test("final failure marks the plan failed and banners the comment without losing
     assert.doesNotMatch(comments[0]!.body, /WARNING/);
   });
 });
+
+test("monthly cap blocks generation before any model call and resets with the calendar month", async (t) => {
+  const client = new PGlite(); t.after(() => client.close());
+  const dir = new URL("../../../packages/db/migrations/", import.meta.url);
+  for (const file of (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort()) await client.exec(await readFile(new URL(file, dir), "utf8"));
+  const db = drizzle(client);
+  await db.insert(installations).values([
+    { id: 1, accountLogin: "org", accountType: "Organization", config: { monthlyPlanLimit: 2 } },
+    { id: 2, accountLogin: "other", accountType: "Organization", config: { monthlyPlanLimit: 2 } },
+  ]);
+  // Last month's usage and another tenant's usage must not count.
+  await db.insert(usage).values([
+    { installationId: 1, repo: "repo", prNumber: 1, model: "m", createdAt: new Date(Date.now() - 40 * 86_400_000) },
+    { installationId: 2, repo: "repo", prNumber: 1, model: "m" },
+    { installationId: 2, repo: "repo", prNumber: 1, model: "m" },
+  ]);
+  const comments: { id: number; number: number; body: string; user: { login: string } }[] = [];
+  const paginate = Object.assign(async () => [{ filename: "a.ts", status: "modified", additions: 1, deletions: 0, patch: "+a" }], {
+    async *iterator(_: unknown, args: { issue_number: number }) { yield { data: comments.filter((c) => c.number === args.issue_number) }; },
+  });
+  const notFound = async () => { throw Object.assign(new Error("nf"), { status: 404 }); };
+  const octokit = {
+    paginate,
+    rest: {
+      pulls: { get: async () => ({ data: { title: "T", body: "", state: "open", draft: false, head: { sha: job.headSha } } }), listFiles() {} },
+      repos: { getContent: notFound, getReadme: notFound },
+      issues: {
+        listComments() {},
+        createComment: async ({ issue_number, body }: { issue_number: number; body: string }) => { const c = { id: comments.length + 1, number: issue_number, body, user: { login: "oxyqa-staging[bot]" } }; comments.push(c); return { data: c }; },
+        updateComment: async ({ comment_id, body }: { comment_id: number; body: string }) => { comments.find((c) => c.id === comment_id)!.body = body; },
+      },
+    },
+  } as unknown as Octokit;
+  let calls = 0;
+  const deps = { db: db as unknown as Database, octokit, slug: "oxyqa-staging", model: "offline-stub", generate: async () => { calls++; return result; } };
+
+  await processPlan(job, deps);
+  await processPlan({ ...job, prNumber: 8 }, deps);
+  assert.equal(calls, 2);
+  const limited = await processPlan(job, deps);
+  assert.equal((limited as { skipped: string }).skipped, "monthly plan limit reached");
+  assert.equal(calls, 2, "no model call once the cap is reached");
+  assert.match(comments[0]!.body, /\[!NOTE\][\s\S]*limit of 2 test plans per month[\s\S]*earlier run[\s\S]*Keyboard login/);
+  assert.equal((await db.select().from(plans).where(eq(plans.prNumber, 7)))[0]!.status, "limited");
+  assert.equal((await db.select().from(usage).where(eq(usage.installationId, 1))).length, 3, "skipped runs are not metered");
+
+  await processPlan({ ...job, prNumber: 9 }, deps);
+  assert.match(comments[2]!.body, /\[!NOTE\]/, "a PR with no plan yet gets a standalone notice");
+  assert.doesNotMatch(comments[2]!.body, /earlier run/);
+
+  await processPlan(job, { ...deps, mode: "self-hosted" });
+  assert.equal(calls, 3, "self-hosted deployments are never capped");
+  const nextMonth = new Date(); nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1, 2);
+  await processPlan(job, { ...deps, now: () => nextMonth });
+  assert.equal(calls, 4, "the cap resets with the UTC month");
+  assert.doesNotMatch(comments[0]!.body, /\[!NOTE\]/);
+});
