@@ -10,6 +10,7 @@ function fixture(overrides: Partial<CommandDependencies> = {}) {
   const deps: CommandDependencies = {
     slug: "oxyqa-staging", canWrite: async () => true, isPullRequest: async () => true,
     remember: async (_, text) => { effects.push(`remember:${text}`); }, forget: async () => { effects.push("forget"); return 1; },
+    createIssue: async () => ({ status: "created", number: 12, url: "https://github.com/org/repo/issues/12" }),
     interpret: async () => ({ type: "help" }), forgetIds: async (_, ids) => { effects.push(`forgetIds:${ids.join(",")}`); return ids.length; },
     currentHead: async () => "current-sha", enqueue: async (job, id) => { if (!jobs.has(id)) jobs.set(id, job); },
     acknowledge: async (_, text) => { effects.push(text); }, ...overrides,
@@ -107,4 +108,27 @@ test("a router outage degrades to help without retrying or side effects", async 
   assert.deepEqual(await processCommand(freeform, f.deps), { command: "freeform", interpreted: "error" });
   assert.match(f.effects[0]!, /couldn't interpret that just now[\s\S]*exact commands still work/);
   assert.equal(f.jobs.size, 0);
+});
+
+test("create issue reports each outcome and is reachable by keyword and by routing", async () => {
+  const keyword = { ...base, command: { type: "create-issue" } } as const;
+  const created = fixture(); await processCommand(keyword, created.deps);
+  assert.match(created.effects[0]!, /Opened #12 with this plan as a checklist/);
+  const outcomes = [
+    [{ status: "updated", number: 12, url: "u" }, /Updated #12[\s\S]*checkboxes were reset/],
+    [{ status: "no-plan" }, /no test plan on this pull request yet[\s\S]*regenerate/],
+    [{ status: "no-permission" }, /Issues: write/],
+    [{ status: "issues-disabled" }, /Issues are disabled/],
+  ] as const;
+  for (const [result, pattern] of outcomes) {
+    const f = fixture({ createIssue: async () => result });
+    await processCommand(keyword, f.deps);
+    assert.match(f.effects[0]!, pattern);
+  }
+  const routed = fixture({ interpret: async () => ({ type: "create-issue" }) });
+  assert.deepEqual(await processCommand({ ...base, command: { type: "freeform", text: "make this a ticket" } }, routed.deps), { command: "freeform", interpreted: "create-issue" });
+  let called = 0;
+  const denied = fixture({ canWrite: async () => false, createIssue: async () => { called++; return { status: "no-plan" }; } });
+  await processCommand(keyword, denied.deps);
+  assert.equal(called, 0);
 });

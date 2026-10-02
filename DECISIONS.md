@@ -192,9 +192,15 @@ only while testing.
 
 ## 6. Phase 3 sketches
 
-- **3a GitHub Issues (command-driven first):** `@<slug> create issues` on a plan
-  → ONE tracking issue containing the checklist (never N issues — spam).
-  Requires bumping App perm Issues R→W at build time (users re-approve).
+- **3a GitHub Issues (built; needs a permission bump to go live):**
+  `@<slug> create issue` (keyword or natural language) → ONE tracking issue
+  per PR with the latest posted plan as a tickable checklist (never N issues —
+  spam). Case numbers match the PR comment (`numberCases`; `test_cases.position`
+  keeps generated order). Re-running updates the same issue
+  (`plans.tracking_issue_number`) and resets its checkboxes; a deleted issue is
+  replaced. **User action:** bump both Apps' Issues permission R→W (installs
+  must re-approve); until then the bot replies that it needs the permission.
+  Not built: syncing checkbox state back, auto-closing with the PR.
 - **3b Linear:** per-workspace API key stored in install config, **encrypted at
   rest: AES-256-GCM with an `ENCRYPTION_KEY` env var** (no KMS dependency —
   self-hosting rule). Push cases to a configured team/project; write Linear ids

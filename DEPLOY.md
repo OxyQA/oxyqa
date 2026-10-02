@@ -64,7 +64,7 @@ staging; prod only moves on a tag.
 Create under the **OxyQA org** (org → Settings → Developer settings → GitHub
 Apps): name `OxyQA Staging`, webhook URL = the Railway webhook domain +
 `/webhooks/github`, fresh webhook secret. Permissions: Contents R, Pull requests
-R/W, Checks R/W, Metadata R, Issues R. Events: `pull_request`, `issue_comment`.
+R/W, Checks R/W, Metadata R, Issues R (**R/W** to enable `create issue`). Events: `pull_request`, `issue_comment`.
 Install on `OxyQA/oxyqa` (dogfooding: staging comments test plans on our own
 PRs) and any staging test repos.
 

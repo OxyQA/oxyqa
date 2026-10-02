@@ -11,6 +11,7 @@ import { syncInstallation, type GitHubInstallation } from "./installations.js";
 import { createMemoryStore } from "./memories.js";
 import { writeBotComment } from "./github-comments.js";
 import { processPlan, reportPlanFailure } from "./plans.js";
+import { upsertTrackingIssue } from "./tracking-issue.js";
 
 const config = getConfig();
 const errors = await createErrorReporter(config.errorReporting, "worker");
@@ -70,6 +71,7 @@ const worker = new Worker<OxyqaJob>(
           return interpretRoutedCommand(routed, saved);
         },
         forgetIds: (c, ids) => memories.forgetIds(c, ids),
+        createIssue: (c) => upsertTrackingIssue(c, { db, octokit }),
         currentHead: async () => {
           const { data } = await octokit.rest.pulls.get({ ...scope, pull_number: command.prNumber });
           return data.state === "open" && !data.draft ? data.head.sha : null;

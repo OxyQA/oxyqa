@@ -118,6 +118,7 @@ Exact commands skip the model call and behave identically:
 | `@oxyqa-staging forget Safari` | Deactivate memories containing that literal text, case-insensitively |
 | `@oxyqa-staging regenerate` | Regenerate the current open, non-draft PR head and update the plan comment |
 | `@oxyqa-staging focus: accessibility` | Regenerate with one-time emphasis, without changing saved guidance |
+| `@oxyqa-staging create issue` | Open one tracking issue with the plan as a tickable checklist (re-running updates it). Needs the app's **Issues: write** permission |
 
 The app resolves its own slug at startup, so use the dev/staging/prod bot's actual
 mention. Remember/forget inputs allow 2,000 characters; focus allows 1,000.

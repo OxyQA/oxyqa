@@ -11,6 +11,9 @@ test("explicit commands support environment slug and bot suffix", () => {
   assert.deepEqual(parseAgentCommand("@oxyqa[bot] FOCUS: keyboard\naccessibility", "oxyqa"), { type: "focus", areas: "keyboard\naccessibility" });
   assert.deepEqual(parseAgentCommand("@oxyqa forget Mobile", "oxyqa"), { type: "forget", match: "Mobile" });
   assert.deepEqual(parseAgentCommand("@oxyqa regenerate", "oxyqa"), { type: "regenerate" });
+  for (const body of ["@oxyqa create issue", "@oxyqa Create issues", "@oxyqa create a tracking issue"]) {
+    assert.deepEqual(parseAgentCommand(body, "oxyqa"), { type: "create-issue" });
+  }
 });
 
 test("ordinary mentions, other bots and quoted commands do not execute", () => {
@@ -42,6 +45,7 @@ test("routed commands are validated: limits hold, forget is bounded to listed me
   assert.deepEqual(routed("focus", "a".repeat(1001)), { type: "help" });
   assert.deepEqual(routed("regenerate", "ignored"), { type: "regenerate" });
   assert.deepEqual(routed("none"), { type: "help" });
+  assert.deepEqual(routed("create_issue", "ignored"), { type: "create-issue" });
   assert.deepEqual(routed("forget", "", [2, 2, 0, -1, 3, 99]), { type: "forget", memories: [saved[1]] });
   assert.deepEqual(routed("forget"), { type: "forget", memories: [] });
 });

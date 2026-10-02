@@ -9,10 +9,10 @@ import { MAX_FOCUS_CHARS, MAX_MEMORY_CHARS } from "../commands.js";
 import { type LlmObserver, observeLlmCall } from "../observability.js";
 import { type LlmConfig, resolveModel } from "./model.js";
 
-export const ROUTER_PROMPT_VERSION = "r1";
+export const ROUTER_PROMPT_VERSION = "r2";
 
 export const routedCommandSchema = z.object({
-  intent: z.enum(["remember", "forget", "regenerate", "focus", "none"]).describe("The single action the maintainer wants."),
+  intent: z.enum(["remember", "forget", "regenerate", "focus", "create_issue", "none"]).describe("The single action the maintainer wants."),
   text: z.string().describe("remember: the guidance to save. focus: the areas to emphasize. Otherwise an empty string."),
   memoryNumbers: z.array(z.number().int()).describe("forget: numbers of the saved memories to remove. Otherwise an empty list."),
 });
@@ -24,6 +24,7 @@ const SYSTEM = `You route comments addressed to OxyQA, a GitHub bot that writes 
 - forget: they want previously saved guidance removed. Put the numbers of the matching saved memories in "memoryNumbers". Choose only memories that clearly match what they describe; if none match, return an empty list.
 - regenerate: they want this pull request's test plan generated again, with no particular emphasis.
 - focus: they want this pull request's plan regenerated with emphasis on particular areas, for this run only. Put the areas in "text".
+- create_issue: they want this pull request's test plan turned into a GitHub issue or checklist they can track or assign.
 - none: anything else — questions, thanks, discussion, requests OxyQA cannot do, or unclear intent.
 
 Lasting guidance ("always", "from now on", "in this repo we…") is remember, not focus. Emphasis for this pull request only ("for this one", "here", "this time") is focus. When the comment asks for both, choose remember.
@@ -70,6 +71,7 @@ export type Interpretation =
   | { type: "forget"; memories: { id: string; content: string }[] }
   | { type: "regenerate" }
   | { type: "focus"; areas: string }
+  | { type: "create-issue" }
   | { type: "help" };
 
 /**
@@ -90,6 +92,8 @@ export function interpretRoutedCommand(routed: RoutedCommand, memories: readonly
     }
     case "regenerate":
       return { type: "regenerate" };
+    case "create_issue":
+      return { type: "create-issue" };
     default:
       return { type: "help" };
   }

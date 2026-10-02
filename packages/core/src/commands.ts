@@ -9,6 +9,7 @@ export type AgentCommand =
   | { type: "forget"; match: string }
   | { type: "regenerate" }
   | { type: "focus"; areas: string }
+  | { type: "create-issue" }
   | { type: "freeform"; text: string }
   | { type: "help" };
 
@@ -23,6 +24,7 @@ export function parseAgentCommand(body: string, slug: string): AgentCommand | nu
   if (!mention) return null;
   const command = body.slice(mention[0].length).trim();
   if (/^regenerate$/i.test(command)) return { type: "regenerate" };
+  if (/^create (?:an? |the )?(?:tracking )?issues?$/i.test(command)) return { type: "create-issue" };
   const remember = /^remember:\s*([\s\S]+)$/i.exec(command)?.[1]?.trim();
   if (remember && remember.length <= MAX_MEMORY_CHARS) return { type: "remember", text: remember };
   const forget = /^forget\s+([\s\S]+)$/i.exec(command)?.[1]?.trim();
@@ -36,5 +38,5 @@ export function parseAgentCommand(body: string, slug: string): AgentCommand | nu
 }
 
 export function commandHelp(slug: string): string {
-  return `Tell me what you need in plain language, or use an exact command (repository write/admin access required):\n\n- \`@${slug} remember: <text>\` — save repository guidance (up to 2,000 characters).\n- \`@${slug} forget <match>\` — deactivate memories containing this literal text (case-insensitive).\n- \`@${slug} regenerate\` — regenerate the current PR head.\n- \`@${slug} focus: <areas>\` — regenerate with one-time emphasis (up to 1,000 characters).\n\nStart your comment with the mention. Memories apply to future plans; use regenerate to update this one.`;
+  return `Tell me what you need in plain language, or use an exact command (repository write/admin access required):\n\n- \`@${slug} remember: <text>\` — save repository guidance (up to 2,000 characters).\n- \`@${slug} forget <match>\` — deactivate memories containing this literal text (case-insensitive).\n- \`@${slug} regenerate\` — regenerate the current PR head.\n- \`@${slug} focus: <areas>\` — regenerate with one-time emphasis (up to 1,000 characters).\n- \`@${slug} create issue\` — open (or update) one tracking issue with this plan as a checklist.\n\nStart your comment with the mention. Memories apply to future plans; use regenerate to update this one.`;
 }

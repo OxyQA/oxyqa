@@ -202,12 +202,13 @@ export async function processPlan(job: PrJob, { db, octokit, slug, model, genera
     // 8. Atomically persist plan status and replace its cases on regeneration.
     await tx
       .update(plans)
-      .set({ status: "posted", commentId, promptVersion, updatedAt: new Date() })
+      .set({ status: "posted", commentId, promptVersion, summary: plan.summary, updatedAt: new Date() })
       .where(eq(plans.id, planId));
     await tx.delete(testCases).where(eq(testCases.planId, planId));
     await tx.insert(testCases).values(
-      plan.testCases.map((tc) => ({
+      plan.testCases.map((tc, position) => ({
         planId,
+        position,
         title: tc.title,
         description: tc.description,
         steps: tc.steps,

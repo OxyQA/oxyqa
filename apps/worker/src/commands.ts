@@ -1,4 +1,5 @@
 import { commandHelp, commandJobId, type CommandJob, type Interpretation, type PrJob } from "@oxyqa/core";
+import type { TrackingIssueResult } from "./tracking-issue.js";
 
 export interface CommandDependencies {
   slug: string;
@@ -9,6 +10,7 @@ export interface CommandDependencies {
   /** Routes free text to an action (model call). */
   interpret(job: CommandJob, text: string): Promise<Interpretation>;
   forgetIds(job: CommandJob, ids: string[]): Promise<number>;
+  createIssue(job: CommandJob): Promise<TrackingIssueResult>;
   currentHead(job: CommandJob): Promise<string | null>;
   enqueue(job: PrJob, id: string): Promise<unknown>;
   acknowledge(job: CommandJob, text: string): Promise<void>;
@@ -74,6 +76,15 @@ export async function processCommand(job: CommandJob, deps: CommandDependencies)
       if (action.type !== "focus") reply = "Queued a new plan for the current PR head.";
       else if (routed) reply = `Queued a new plan with one-time focus on:\n\n${quote(action.areas)}\n\nSaved repository guidance is unchanged.`;
       else reply = "Queued a new plan with one-time focus. Saved repository guidance is unchanged.";
+      break;
+    }
+    case "create-issue": {
+      const result = await deps.createIssue(job);
+      if (result.status === "created") reply = `Opened #${result.number} with this plan as a checklist.`;
+      else if (result.status === "updated") reply = `Updated #${result.number} with the current plan. Its checkboxes were reset.`;
+      else if (result.status === "no-plan") reply = `There's no test plan on this pull request yet. Comment \`@${deps.slug} regenerate\` first.`;
+      else if (result.status === "issues-disabled") reply = "Issues are disabled for this repository, so I can't open a tracking issue.";
+      else reply = "I need the **Issues: write** permission to open a tracking issue. An organization owner can approve the updated permissions in the app's installation settings.";
       break;
     }
     default:

@@ -15,7 +15,7 @@
 //
 // Planned (Phase 2+):
 //   - context/      Linear tickets
-//   - integrations/ Linear push (Jira/Xray deferred)
+//   - integrations/ Linear push (Jira/Xray deferred); GitHub tracking issue is in output/issue
 export * from "./config.js";
 export * from "./repo-config.js";
 export * from "./limits.js";
@@ -33,3 +33,4 @@ export * from "./llm/route.js";
 export * from "./output/comment.js";
 export * from "./output/failure.js";
 export * from "./observability.js";
+export * from "./output/issue.js";

@@ -38,6 +38,22 @@ function renderCase(lines: string[], tc: TestCase, num: number, heading: string,
   lines.push("");
 }
 
+/**
+ * Cases with the global numbers the PR comment shows, in display order.
+ * "grouped" numbers in priority order; "flat" keeps the generated order.
+ * Shared with the tracking issue so "case 3" means the same thing everywhere.
+ */
+export function numberCases<T extends { priority: string }>(cases: readonly T[], style: CommentStyle): { num: number; tc: T }[] {
+  if (style !== "grouped") return cases.map((tc, i) => ({ num: i + 1, tc }));
+  const rank = (p: string) => { const i = (PRIORITY_ORDER as string[]).indexOf(p); return i === -1 ? PRIORITY_ORDER.length : i; };
+  return cases.map((tc, i) => ({ tc, i })).sort((a, b) => rank(a.tc.priority) - rank(b.tc.priority) || a.i - b.i)
+    .map(({ tc }, i) => ({ num: i + 1, tc }));
+}
+
+export function priorityLabel(priority: string): string {
+  return PRIORITY_LABEL[priority] ?? priority;
+}
+
 export function renderPlanComment(
   plan: TestPlan,
   meta: CommentMeta,
