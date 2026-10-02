@@ -3,6 +3,7 @@
 // retries have one home.
 import { generateObject } from "ai";
 import { PROMPT_VERSION, buildTestPlanPrompt, type PromptInput } from "../prompt/build.js";
+import { type LlmObserver, observeLlmCall } from "../observability.js";
 import { type LlmConfig, resolveModel } from "./model.js";
 import { type TestCase, type TestPlan, testPlanSchema } from "./schema.js";
 
@@ -42,37 +43,53 @@ export interface GenerateResult {
   };
 }
 
-export async function generateTestPlan(llm: LlmConfig, input: PromptInput): Promise<GenerateResult> {
+export interface GenerateOptions {
+  /** Optional LLM tracing sink (Langfuse); see observability.ts. */
+  observer?: LlmObserver | null;
+  /** Trace metadata — ids only (installation, repo, PR, head SHA). */
+  metadata?: Record<string, string | number | undefined>;
+}
+
+export async function generateTestPlan(llm: LlmConfig, input: PromptInput, options: GenerateOptions = {}): Promise<GenerateResult> {
   const model = resolveModel(llm);
   const { system, prompt } = buildTestPlanPrompt(input);
 
-  const { object, usage, providerMetadata } = await generateObject({
-    model,
-    schema: testPlanSchema,
-    messages: [
-      {
-        role: "system",
-        content: system,
-        // Cache breakpoint: everything up to here ([tools +] system + repo
-        // context) is stable per-repo; the per-PR prompt below varies freely.
-        providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
-      },
-      { role: "user", content: prompt },
-    ],
-  });
-
-  const cache = providerMetadata?.anthropic as
-    | { cacheReadInputTokens?: number | null; cacheCreationInputTokens?: number | null }
-    | undefined;
+  const { output, usage } = await observeLlmCall(
+    options.observer,
+    { name: "test-plan", model: llm.model, system, prompt, metadata: { ...options.metadata, promptVersion: PROMPT_VERSION } },
+    async () => {
+      const { object, usage, providerMetadata } = await generateObject({
+        model,
+        schema: testPlanSchema,
+        messages: [
+          {
+            role: "system",
+            content: system,
+            // Cache breakpoint: everything up to here ([tools +] system + repo
+            // context) is stable per-repo; the per-PR prompt below varies freely.
+            providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+          },
+          { role: "user", content: prompt },
+        ],
+      });
+      const cache = providerMetadata?.anthropic as
+        | { cacheReadInputTokens?: number | null; cacheCreationInputTokens?: number | null }
+        | undefined;
+      return {
+        output: object,
+        usage: {
+          inputTokens: usage.promptTokens ?? 0,
+          outputTokens: usage.completionTokens ?? 0,
+          cacheReadInputTokens: cache?.cacheReadInputTokens ?? 0,
+          cacheCreationInputTokens: cache?.cacheCreationInputTokens ?? 0,
+        },
+      };
+    },
+  );
 
   return {
-    plan: input.behavior ? enforceMaxCases(object, input.behavior.maxCases) : object,
+    plan: input.behavior ? enforceMaxCases(output, input.behavior.maxCases) : output,
     promptVersion: PROMPT_VERSION,
-    usage: {
-      inputTokens: usage.promptTokens ?? 0,
-      outputTokens: usage.completionTokens ?? 0,
-      cacheReadInputTokens: cache?.cacheReadInputTokens ?? 0,
-      cacheCreationInputTokens: cache?.cacheCreationInputTokens ?? 0,
-    },
+    usage,
   };
 }

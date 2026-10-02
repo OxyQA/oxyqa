@@ -1,0 +1,87 @@
+# Self-hosted OxyQA: your infrastructure, your model key. Nothing here talks to
+# OxyQA's operators. Setup: docs/SELF_HOSTING.md
+#
+#   cp .env.example .env    # fill in the GitHub App + ANTHROPIC_API_KEY
+#   docker compose up -d
+#
+# Postgres and Redis below are private to this stack; DATABASE_URL / REDIS_URL
+# from .env are overridden so a copied cloud .env can't point at shared services.
+
+x-oxyqa: &oxyqa
+  build: .
+  image: oxyqa:local
+  env_file: .env
+  environment: &oxyqa-env
+    OXYQA_MODE: self-hosted
+    DATABASE_URL: postgresql://oxyqa:${POSTGRES_PASSWORD:-oxyqa}@postgres:5432/oxyqa
+    REDIS_URL: redis://redis:6379
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: oxyqa
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-oxyqa}
+      POSTGRES_DB: oxyqa
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U oxyqa -d oxyqa"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # BullMQ needs a durable, non-evicting Redis.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  # One-shot: applies database migrations, then exits.
+  migrate:
+    <<: *oxyqa
+    command: ["pnpm", "--filter", "@oxyqa/db", "db:migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  webhook:
+    <<: *oxyqa
+    command: ["pnpm", "--filter", "@oxyqa/webhook", "start"]
+    environment:
+      <<: *oxyqa-env
+      WEBHOOK_PORT: "3001"
+    ports:
+      - "${OXYQA_PORT:-3001}:3001"
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    <<: *oxyqa
+    command: ["pnpm", "--filter", "@oxyqa/worker", "start"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  redis-data:

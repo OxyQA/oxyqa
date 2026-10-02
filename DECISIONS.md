@@ -45,7 +45,7 @@ each credential via API before moving on; **secrets never pasted into chat**
 | First users / ICP | **Indie & startup teams** (small eng teams, no dedicated QA) | Linear over Jira; light compliance urgency; low-friction pricing; GitHub-native UX is the product's home |
 | Integration order | **GitHub Issues first, then Linear.** Jira/Xray only on real enterprise pull | Phase 3a = GitHub-native, 3b = Linear; Xray drops out of near-term scope |
 | Output mode | **Human-runnable checklist is the core product; executable tests (Playwright first) come later as opt-in premium** — only after checklist quality is proven via edit-rate/feedback | Phase 2 optimizes checklist quality; no exec-test work before quality metrics exist |
-| First revenue | **GitHub Marketplace freemium** (free tier + paid). Self-hosted stays the architecture principle from day one but becomes the *premium tier later*, not the first sale | Phase 5 = Marketplace billing; Stripe/license-key work deferred to the self-hosted tier |
+| First revenue | **GitHub Marketplace freemium** (free tier + paid). Self-hosted stays the architecture principle from day one but becomes the *premium tier later*, not the first sale | Phase 5 = Marketplace billing; Stripe/license-key work deferred to the self-hosted tier. **Constraint found 2026-10-02:** paid Marketplace plans require a verified publisher (org 2FA + verified domain) **and ≥100 installs**; a free listing needs only a privacy policy + support contact. So the sequence is direct install link → free listing → paid plans after 100 installs (or bill directly via Stripe sooner — user call when it matters) |
 
 ## 2. Standing conventions (decided, in force now)
 
@@ -68,13 +68,25 @@ each credential via API before moving on; **secrets never pasted into chat**
 ## 3. Phase 2 spec — context enrichment (next major build)
 
 Priority-ordered context sources, under a **~12k-token total context budget**
-(diff keeps its existing 24k-char budget):
+(the diff has its own budget — **amended 2026-10-02: 24k → 60k chars
+(~15k tokens)** because dogfood PRs showed 27 of 42 files dropped, in
+alphabetical order, with any file that didn't fit dropped whole. Diff
+windowing now ranks source > tests > docs/config > generated noise, truncates
+an oversized file (max 40% of the budget) instead of dropping it, lists
+unshown files by name, and the plan footer says when a large PR was only
+partly analyzed. Cost: at most ~$0.03 more input per plan on Sonnet 4.6;
+revert `DEFAULT_DIFF_BUDGET` if that matters):
 
 1. `.oxyqa/context.md` from the target repo (team-authored domain terms, testing
    conventions). Cap ~6k tokens, truncate tail with a visible notice.
 2. Repo memories from reply-to-agent (§4) — latest 20 active, ~2k tokens.
-3. Linked tickets: parse GitHub `#123` refs (Phase 3a) and Linear keys
-   (`ABC-123`, Phase 3b) from PR title/body/branch name; fetch + summarize.
+3. Linked tickets: **GitHub issues built** — refs parsed from PR title/body
+   (closing keywords first, then mentions, same-repo `#12` / `owner/repo#12` /
+   issue URLs; code spans ignored) and the branch name (`12-slug`, `issue-12`);
+   max 3 issues, ~600 tokens each, truncated not summarized (no extra LLM
+   call). PRs and unreadable issues are skipped; never fails a plan. They are
+   per-PR, so they sit in the volatile prompt tail (prompt v5), not the cached
+   prefix. Linear keys (`ABC-123`) follow in Phase 3b.
 4. Repo README excerpt (first ~1.5k tokens) as fallback orientation.
 
 **Prompt caching:** restructure so `[system + repo context]` is a stable prefix
@@ -104,6 +116,19 @@ Prose context stays in `context.md`. Per-install overrides live in the existing
   Latest 20 active memories fit a ~2k-token prompt budget.
 - **Regeneration:** new comment = new run at the current open, non-draft head.
   Same-comment retries share a queue ID. Focus lives only in that job/prompt tail.
+- **Natural language** *(user, 2026-10-02; built)*: any other text after the
+  leading mention is `freeform`. The worker — only after the write-access
+  check — routes it with a small model (`LLM_ROUTER_MODEL`, default
+  `claude-haiku-4-5`; structured output: intent + text + memory numbers) to
+  remember / forget / regenerate / focus / none. The router only chooses:
+  `interpretRoutedCommand` re-applies the keyword limits, and forget can only
+  pick from the repository's own listed memories. Replies always echo the
+  interpretation (guidance saved, memories removed, focus queued). Keyword
+  commands stay a no-model fast path; malformed keyword commands get help
+  rather than reinterpretation; a router outage degrades to help with no
+  retry. Router calls are not metered against the monthly cap (≈ $0.001
+  each) — revisit if abused. `pnpm --filter @oxyqa/worker route:sample` is the
+  live regression set (12/12 on 2026-10-02); it never runs in CI.
 - **Ack:** reply comment via existing PR-comment write. (👍-reaction ack needs
   Issues:write — deferred deliberately; Issues stays read-only until Phase 3a.)
 
@@ -118,8 +143,10 @@ Prose context stays in `context.md`. Per-install overrides live in the existing
    Account type comes from GitHub (`User`/`Organization`, `Enterprise` for
    enterprise accounts, `Unknown` if absent) — never defaulted.
    **Uninstall = soft delete** (`installations.deleted_at`); plans, memories
-   and usage are kept (installation ids are never reused). A retention purge
-   for deleted installs is deferred to the privacy/terms work before public beta.
+   and usage are kept (installation ids are never reused). **Retention: 30 days** after
+   uninstall the worker hard-deletes the installation and everything under it
+   (`purgeUninstalled`, at boot and every 6 h) — the figure `docs/public/PRIVACY.md`
+   promises; change both together.
 2. **Failure UX:** after final retry, set plan `status=failed` and post/update
    the PR comment with a one-line reason + "`@<slug> regenerate` to retry".
    Decision: **comment-first UX; Check Runs stay unused** until exec-test era
@@ -131,12 +158,34 @@ Prose context stays in `context.md`. Per-install overrides live in the existing
    (`describeFailure`); raw errors stay in worker logs. Stale/closed PRs and
    runs overtaken by a later success stay quiet. Command-job failures are
    still silent (log only) — revisit if users hit it.
-3. **Observability:** Sentry (free tier) in both services at first external
-   user; Langfuse **Cloud** free tier during beta (self-host it only when the
-   self-hosted product tier ships). Structured logging (pino) is low priority.
-4. **Free-tier gating:** enforce in worker pre-LLM — count plans per
-   installation per calendar month; initial cap **50 plans/mo** (constant, per-
-   install override via config JSONB). Build alongside Phase 5.
+3. **Observability:** built, **off until keys are set** (SDKs load lazily).
+   Sentry (`SENTRY_DSN`, free tier) in both services: reports a job once, on
+   its final attempt, plus unhandled webhook errors; all SDK data collection
+   that could carry customer code is disabled (HTTP bodies, gen-AI I/O, queue
+   args, local variables). Langfuse **Cloud** free tier during beta
+   (`LANGFUSE_PUBLIC_KEY`/`SECRET_KEY`/`HOST`): one generation per model call
+   with prompt, output, tokens (incl. cache) and latency — this **does** send
+   diffs to Langfuse, so it must be named in the privacy note; self-host it
+   when the self-hosted tier ships. Structured logging (pino) is low priority.
+4. **Free-tier gating:** enforced in the worker pre-LLM. Counts `usage` rows
+   (every model run, including regenerations) per installation per **UTC
+   calendar month**; default cap **50/mo** (`FREE_MONTHLY_PLAN_LIMIT`).
+   Override per install via `installations.config.monthlyPlanLimit`
+   (non-negative integer, or `"unlimited"`); invalid values fall back to the
+   default, and the key is **not** a repo-yml knob (tenants can't raise their
+   own cap). `OXYQA_MODE=self-hosted` is uncapped. Over the cap: no model call,
+   plan `status=limited`, and a `[!NOTE]` notice with the reset date on the
+   plan comment. Soft cap — concurrent jobs can overshoot by up to the worker
+   concurrency (5). Set the dogfood install on staging to `"unlimited"`.
+
+5. **Feedback + metrics (built):** when a PR closes, the worker snapshots
+   human 👍/👎 reactions on the plan comment into `feedback` (reactions have
+   no webhook; re-collection replaces rows). `pnpm --filter @oxyqa/worker
+   metrics [days]` prints installs, plans by status, model runs per posted
+   plan (regenerate rate), tokens, feedback and tracking issues straight from
+   the database. **No product-analytics service until there is a web surface**
+   (landing page/dashboard, Phase 5) — the product lives inside GitHub and the
+   database already holds its funnel.
 
 ## 5a. MVP gate — "outside teams can install it" *(proposed 2026-10-02, pending user OK)*
 
@@ -161,9 +210,15 @@ only while testing.
 
 ## 6. Phase 3 sketches
 
-- **3a GitHub Issues (command-driven first):** `@<slug> create issues` on a plan
-  → ONE tracking issue containing the checklist (never N issues — spam).
-  Requires bumping App perm Issues R→W at build time (users re-approve).
+- **3a GitHub Issues (built; needs a permission bump to go live):**
+  `@<slug> create issue` (keyword or natural language) → ONE tracking issue
+  per PR with the latest posted plan as a tickable checklist (never N issues —
+  spam). Case numbers match the PR comment (`numberCases`; `test_cases.position`
+  keeps generated order). Re-running updates the same issue
+  (`plans.tracking_issue_number`) and resets its checkboxes; a deleted issue is
+  replaced. **User action:** bump both Apps' Issues permission R→W (installs
+  must re-approve); until then the bot replies that it needs the permission.
+  Not built: syncing checkbox state back, auto-closing with the PR.
 - **3b Linear:** per-workspace API key stored in install config, **encrypted at
   rest: AES-256-GCM with an `ENCRYPTION_KEY` env var** (no KMS dependency —
   self-hosting rule). Push cases to a configured team/project; write Linear ids
@@ -173,8 +228,8 @@ only while testing.
 
 | Debt | Exit |
 |---|---|
-| Prod runs via `tsx` (workspace pkgs resolve to TS source; `node dist` crashes) | Bundle each app with **tsup** during Phase 4 packaging |
-| Opus/Fable reject AI-SDK's default `temperature:0` on structured output (HTTP 400) | In `model.ts`/`generate.ts`, omit sampling params for opus-4-x/fable model ids; implement with paid-tier model selection |
+| Prod and the self-host image run via `tsx` (workspace pkgs resolve to TS source; `node dist` crashes) | Acceptable: one code path for cloud and self-hosted. Bundle with **tsup** only if image size or cold start becomes a problem |
+| Main model is pinned to `claude-sonnet-4-6`. AI SDK v4 `generateObject` sends `temperature: 0` **and forces `tool_choice`**; current models (Sonnet 5.5, Opus 5.x, Fable 5.x) reject one or both with HTTP 400 (checked 2026-10-02). Haiku 4.5 (router) and Sonnet 4.6 accept both | Upgrade `ai` / `@ai-sdk/anthropic` (v4 → current major, which uses native structured outputs) as its own PR with a `generate:sample` + `route:sample` before/after check; do it with paid-tier model selection or when Sonnet 4.6 nears retirement. Omitting sampling params alone is **not** enough |
 | `ioredis` pinned 5.11.1 via pnpm override (bullmq type clash) | Revisit on bullmq major bump only |
 | Dev DB is `db:push`-managed (no migration history) | Acceptable permanently for local; staging/prod are migration-managed from first deploy |
 | `apps/dashboard` is a stub | Phase 5: Next.js on Railway; sign-in = GitHub OAuth via the App (that's when callback URL gets set) |
@@ -191,15 +246,10 @@ only while testing.
   and owns the content. Costs an extra LLM call, so it must respect free-tier
   gating. Trigger: Phase 5 onboarding build, or earlier if README-fallback
   plan quality proves weak in beta.
-- **Natural-language replies** *(user, 2026-10-02)* — CodeRabbit-style: keep
-  the leading @mention + write-access check, but route free text through a
-  small structured-output model call to {remember, forget, regenerate, focus,
-  question, help} with extracted args; exact keyword commands stay a no-LLM
-  fast path. Bot always echoes its interpretation ("Saved: …"); `forget`
-  lists what it deactivated. Follow-ons: answer questions about the plan, and
-  inferred memories (`source: inferred`, column already exists). Counts toward
-  free-tier gating. Trigger: after the MVP gate (§5a), or earlier as a demo
-  differentiator.
+- **Plan Q&A and inferred memories** — follow-ons to natural-language replies
+  (§4): answer questions about the current plan ("why is case 3 critical?"),
+  and learn guidance from ordinary review discussion (`source: inferred`,
+  column exists). Trigger: beta feedback asks for it.
 - **Jira/Xray** — trigger: first enterprise team asks.
 - **Executable test generation** — trigger: checklist edit-rate measured & good.
 - **Prod environment (Railway env #2, `oxyqa-prod` Supabase paid, fixed-Pro

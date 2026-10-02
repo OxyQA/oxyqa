@@ -1,10 +1,11 @@
 import {
-  COMMENT_MARKER, REPO_CONFIG_PATH, describeFailure, formatRepoMemories, formatDiff,
-  loadRepoContext, renderFailureComment, renderPlanComment, resolveRepoConfig,
-  type PrJob, type RepoContentReader, type PromptInput, type GenerateResult,
+  COMMENT_MARKER, REPO_CONFIG_PATH, describeFailure, extractIssueRefs, formatLinkedIssues, formatRepoMemories, formatDiff,
+  loadRepoContext, monthWindow, renderFailureComment, renderLimitComment, renderPlanComment,
+  resolveMonthlyPlanLimit, resolveRepoConfig,
+  type LinkedIssue, type PrJob, type RepoContentReader, type PromptInput, type GenerateResult,
 } from "@oxyqa/core";
 import { installations, plans, testCases, usage, type Database } from "@oxyqa/db";
-import { and, eq, sql } from "drizzle-orm";
+import { and, count, eq, gte, sql } from "drizzle-orm";
 import type { Octokit } from "octokit";
 import { createMemoryStore } from "./memories.js";
 import { findBotComment, writeBotComment } from "./github-comments.js";
@@ -49,16 +50,41 @@ function makeContentReader(octokit: Octokit, owner: string, repo: string): RepoC
   };
 }
 
+// Issues referenced by the PR. Missing, deleted or inaccessible issues are
+// skipped — linked context is best-effort and never fails a plan. Pull
+// requests share the issue number space and are not requirements; skip them.
+async function loadLinkedIssues(octokit: Octokit, owner: string, repo: string, numbers: number[]): Promise<LinkedIssue[]> {
+  const issues: LinkedIssue[] = [];
+  for (const issue_number of numbers) {
+    try {
+      const { data } = await octokit.rest.issues.get({ owner, repo, issue_number });
+      if (data.pull_request) continue;
+      issues.push({
+        number: data.number, title: data.title, body: data.body ?? null, state: data.state,
+        labels: data.labels.map((l) => (typeof l === "string" ? l : l.name ?? "")).filter(Boolean),
+      });
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status !== 404 && status !== 410 && status !== 403) throw err;
+    }
+  }
+  return issues;
+}
+
 export interface PlanDependencies {
   db: Database;
   octokit: Octokit;
   slug: string;
   model: string;
-  generate(input: PromptInput): Promise<GenerateResult>;
+  /** `metadata` carries ids only, for LLM tracing. */
+  generate(input: PromptInput, metadata?: Record<string, string | number>): Promise<GenerateResult>;
+  /** Cloud installs are capped per month; self-hosted is unlimited. Defaults to cloud. */
+  mode?: "cloud" | "self-hosted";
+  now?: () => Date;
 }
 
 /** All external boundaries are injected so the full flow can run offline. */
-export async function processPlan(job: PrJob, { db, octokit, slug, model, generate }: PlanDependencies) {
+export async function processPlan(job: PrJob, { db, octokit, slug, model, generate, mode = "cloud", now = () => new Date() }: PlanDependencies) {
   const memories = createMemoryStore(db);
   const { installationId, owner, repo, prNumber, headSha, oneShotFocus } = job;
   const log = (msg: string) => console.log(`[oxyqa-worker] PR #${prNumber} — ${msg}`);
@@ -94,7 +120,28 @@ export async function processPlan(job: PrJob, { db, octokit, slug, model, genera
     `config: ${sources.join("+")} (maxCases=${repoConfig.maxCases}, commentStyle=${repoConfig.commentStyle}, focusAreas=${repoConfig.focusAreas.length}, skipPaths=${repoConfig.skipPaths.length})`,
   );
 
-  // 2. Fetch PR metadata + diff (skipPaths-filtered, budgeted).
+  // 2. Free-tier gate, before any LLM spend. A soft cap: concurrent jobs can
+  //    overshoot by at most the worker concurrency.
+  const limit = resolveMonthlyPlanLimit(mode, installRow?.config);
+  if (limit !== null) {
+    const { start, resetsAt } = monthWindow(now());
+    const [used] = await db.select({ n: count() }).from(usage)
+      .where(and(eq(usage.installationId, installationId), gte(usage.createdAt, start)));
+    if ((used?.n ?? 0) >= limit) {
+      log(`monthly limit reached (${used?.n}/${limit}) — skipping generation`);
+      return db.transaction(async (tx) => {
+        await lockPullRequest(tx, job);
+        const scope = { owner, repo, prNumber };
+        const existing = await findBotComment(octokit, scope, slug, COMMENT_MARKER);
+        const body = renderLimitComment(existing?.body ?? null, { limit, resetsAt, headSha, slug });
+        const commentId = await writeBotComment(octokit, scope, slug, COMMENT_MARKER, body, existing?.id);
+        await tx.update(plans).set({ status: "limited", updatedAt: new Date() }).where(eq(plans.id, planId));
+        return { skipped: "monthly plan limit reached", commentId };
+      });
+    }
+  }
+
+  // 3. Fetch PR metadata + diff (skipPaths-filtered, budgeted).
   const files = await octokit.paginate(octokit.rest.pulls.listFiles, {
     owner,
     repo,
@@ -103,23 +150,29 @@ export async function processPlan(job: PrJob, { db, octokit, slug, model, genera
   });
   const diff = formatDiff(files, { skipPaths: repoConfig.skipPaths });
   log(
-    `${files.length} files changed, ${diff.included} in diff (${diff.skipped} skipped by config, ${diff.omitted} over budget)`,
+    `${files.length} files changed, ${diff.included} in diff (${diff.truncated} truncated, ${diff.skipped} skipped by config, ${diff.omitted} over budget)`,
   );
 
-  // 3. Load repo context (.oxyqa/context.md → README fallback) at the PR head.
+  // 4. Load repo context (.oxyqa/context.md → README fallback) at the PR head.
   const repoContext = await loadRepoContext(reader, headSha);
   log(`context: ${repoContext.source}${repoContext.truncated ? " (truncated)" : ""}`);
 
-  // 4. Generate the test plan (provider-agnostic LLM call).
+  // 5. Linked issues (requirements context), parsed from title/body/branch.
+  const refs = extractIssueRefs({ title: pr.title, body: pr.body, branch: pr.head.ref }, { owner, repo }, prNumber);
+  const linked = refs.length ? await loadLinkedIssues(octokit, owner, repo, refs) : [];
+  if (refs.length) log(`linked issues: ${linked.map((i) => `#${i.number}`).join(", ") || "none readable"} (referenced: ${refs.map((n) => `#${n}`).join(", ")})`);
+
+  // 6. Generate the test plan (provider-agnostic LLM call).
   const { plan, promptVersion, usage: tokens } = await generate({
     prTitle: pr.title,
     prBody: pr.body ?? undefined,
     diff: diff.text,
     repoContext: repoContext.text,
     repoMemories: formatRepoMemories(await memories.load({ installationId, owner, repo })),
+    linkedIssues: formatLinkedIssues(linked),
     oneShotFocus,
     behavior: { maxCases: repoConfig.maxCases, focusAreas: repoConfig.focusAreas },
-  });
+  }, { installationId, repo: `${owner}/${repo}`, prNumber, headSha });
   log(
     `generated ${plan.testCases.length} test cases (${tokens.inputTokens}→${tokens.outputTokens} tok, cache read ${tokens.cacheReadInputTokens} / write ${tokens.cacheCreationInputTokens})`,
   );
@@ -133,8 +186,8 @@ export async function processPlan(job: PrJob, { db, octokit, slug, model, genera
     outputTokens: tokens.outputTokens,
   });
 
-  // 5. Post or update the PR comment (idempotent via the hidden marker).
-  const body = renderPlanComment(plan, { headSha, promptVersion }, repoConfig.commentStyle);
+  // 7. Post or update the PR comment (idempotent via the hidden marker).
+  const body = renderPlanComment(plan, { headSha, promptVersion, coverage: diff }, repoConfig.commentStyle);
   // Concurrent regenerate jobs must not create duplicate comments or interleave case replacement.
   return db.transaction(async (tx) => {
     await lockPullRequest(tx, job);
@@ -146,15 +199,16 @@ export async function processPlan(job: PrJob, { db, octokit, slug, model, genera
     const commentId = await writeBotComment(octokit, { owner, repo, prNumber }, slug, COMMENT_MARKER, body);
     log(`posted plan comment ${commentId}`);
 
-    // 6. Atomically persist plan status and replace its cases on regeneration.
+    // 8. Atomically persist plan status and replace its cases on regeneration.
     await tx
       .update(plans)
-      .set({ status: "posted", commentId, promptVersion, updatedAt: new Date() })
+      .set({ status: "posted", commentId, promptVersion, summary: plan.summary, updatedAt: new Date() })
       .where(eq(plans.id, planId));
     await tx.delete(testCases).where(eq(testCases.planId, planId));
     await tx.insert(testCases).values(
-      plan.testCases.map((tc) => ({
+      plan.testCases.map((tc, position) => ({
         planId,
+        position,
         title: tc.title,
         description: tc.description,
         steps: tc.steps,

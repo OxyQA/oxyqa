@@ -77,6 +77,12 @@ pnpm --filter @oxyqa/webhook dev
 npx smee -u <smee-url> -t http://localhost:3001/webhooks/github
 ```
 
+## Self-hosting
+
+`docker compose up -d` runs the whole product (webhook, worker, Postgres, Redis)
+on your own infrastructure with your own model key — see
+[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
+
 ## Develop without paid services
 
 After installing dependencies, these checks need no credentials, hosted database,
@@ -97,8 +103,20 @@ only run the worker or `generate:sample` when intentionally testing those servic
 ## Reply to the bot
 
 On a PR, start a new comment with your app's mention (for example,
-`@oxyqa-staging`). Only repository collaborators with write/admin access can
-run commands. Bots, edited comments, and ordinary GitHub Issues are ignored.
+`@oxyqa-staging`) and say what you want in plain language:
+
+> @oxyqa-staging from now on, always include a Safari case for checkout changes
+>
+> @oxyqa-staging try again, but concentrate on accessibility this time
+>
+> @oxyqa-staging stop doing the Safari thing, we dropped support
+
+The bot replies with what it understood — the guidance it saved, the memories it
+removed, or the focus it queued — so a misreading is visible and easy to undo.
+Only repository collaborators with write/admin access can use it. Bots, edited
+comments, and ordinary GitHub Issues are ignored.
+
+Exact commands skip the model call and behave identically:
 
 | Command | Effect |
 |---|---|
@@ -106,12 +124,33 @@ run commands. Bots, edited comments, and ordinary GitHub Issues are ignored.
 | `@oxyqa-staging forget Safari` | Deactivate memories containing that literal text, case-insensitively |
 | `@oxyqa-staging regenerate` | Regenerate the current open, non-draft PR head and update the plan comment |
 | `@oxyqa-staging focus: accessibility` | Regenerate with one-time emphasis, without changing saved guidance |
+| `@oxyqa-staging create issue` | Open one tracking issue with the plan as a tickable checklist (re-running updates it). Needs the app's **Issues: write** permission |
 
 The app resolves its own slug at startup, so use the dev/staging/prod bot's actual
-mention. Remember/forget inputs allow 2,000 characters; focus allows 1,000. Unknown
-commands return help. Memories are scoped to installation + owner + repository;
-the latest 20 active memories enter the prompt within a ~2k-token budget. Use
-regenerate after remembering or forgetting to apply the change to an existing plan.
+mention. Remember/forget inputs allow 2,000 characters; focus allows 1,000.
+Questions and anything unclear get the help text. Memories are scoped to
+installation + owner + repository; the latest 20 active memories enter the prompt
+within a ~2k-token budget. Use regenerate after remembering or forgetting to
+apply the change to an existing plan.
+
+## What goes into a plan
+
+Besides the diff, each plan draws on: `.oxyqa/context.md` (or the README when
+that file is absent), saved repository memories, and up to three **linked
+issues** — referenced in the PR title or body (`Fixes #12`, `#12`, an issue URL)
+or implied by the branch name (`12-add-lockout`). Tune behavior with
+`.oxyqa/config.yml` (`maxCases`, `focusAreas`, `skipPaths`, `commentStyle`).
+
+## Is it working? (metrics)
+
+```bash
+pnpm --filter @oxyqa/worker metrics        # last 30 days, database from .env
+railway run --service @oxyqa/worker --environment staging pnpm --filter @oxyqa/worker metrics 7
+```
+
+Prints installs, plans by status, model runs per posted plan (how often people
+regenerate), token totals, 👍/👎 on plan comments (collected when a PR closes),
+active memories and tracking issues.
 
 ## Build order (from the roadmap)
 

@@ -62,9 +62,12 @@ export const plans = pgTable(
     repo: text("repo").notNull(),
     prNumber: integer("pr_number").notNull(),
     headSha: text("head_sha").notNull(),
-    status: text("status").notNull().default("queued"), // queued | processing | posted | failed | superseded
+    status: text("status").notNull().default("queued"), // queued | processing | posted | failed | superseded | limited
     promptVersion: text("prompt_version"),
     commentId: bigint("comment_id", { mode: "number" }), // GitHub PR comment id, for update-in-place
+    summary: text("summary"), // the plan's one-line summary, as posted
+    // GitHub issue tracking this PR's plan as a checklist (Phase 3a). One per PR.
+    trackingIssueNumber: integer("tracking_issue_number"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
@@ -88,6 +91,7 @@ export const testCases = pgTable(
     steps: jsonb("steps").$type<string[]>().default([]).notNull(),
     expected: text("expected"),
     priority: text("priority"), // low | medium | high | critical
+    position: integer("position").notNull().default(0), // order within the plan, as generated
     externalId: text("external_id"), // id in Jira/Xray/Linear once pushed
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },

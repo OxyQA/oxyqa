@@ -1,5 +1,5 @@
 import { verify } from "@octokit/webhooks-methods";
-import { commandJobId, installationJobId, parseAgentCommand, planJobId, type OxyqaJob } from "@oxyqa/core";
+import { commandJobId, feedbackJobId, installationJobId, parseAgentCommand, planJobId, type OxyqaJob } from "@oxyqa/core";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -25,11 +25,18 @@ export interface WebhookDependencies {
   slug: string;
   ping(): Promise<unknown>;
   enqueue(job: OxyqaJob, id: string): Promise<unknown>;
+  /** Unhandled route errors (e.g. Redis down). GitHub sees a 500 and redelivers. */
+  reportError?(err: unknown, context: { event?: string }): void;
 }
 
 /** No connections at import time: signed webhook tests run entirely offline. */
 export function createWebhookApp(deps: WebhookDependencies) {
   const app = new Hono();
+  app.onError((err, c) => {
+    console.error("[oxyqa-webhook] unhandled error:", err.message);
+    deps.reportError?.(err, { event: c.req.header("x-github-event") });
+    return c.json({ error: "internal error" }, 500);
+  });
   app.get("/", (c) => c.json({ service: "oxyqa-webhook", ok: true }));
   app.get("/health", async (c) => {
     try { await deps.ping(); return c.json({ ok: true, redis: "up" }); }
@@ -78,6 +85,12 @@ export function createWebhookApp(deps: WebhookDependencies) {
     const parsed = prEvent.safeParse(payload);
     if (!parsed.success) return c.json({ error: "invalid pull request event" }, 400);
     const p = parsed.data;
+    if (p.action === "closed") {
+      // Reactions have no webhook; the close event is the cue to collect them.
+      const job = { kind: "feedback" as const, installationId: p.installation.id, owner: p.repository.owner.login, repo: p.repository.name, prNumber: p.pull_request.number };
+      await deps.enqueue(job, feedbackJobId(job, c.req.header("x-github-delivery") ?? raw));
+      return c.json({ ok: true, queued: "feedback" });
+    }
     if (!actions.has(p.action) || p.pull_request.draft) return c.json({ ok: true, skipped: p.action });
     const job = {
       installationId: p.installation.id, owner: p.repository.owner.login,

@@ -40,11 +40,20 @@ export interface InstallationJob {
   action: string;
 }
 
-export type OxyqaJob = PrJob | CommandJob | InstallationJob;
+/** Collect 👍/👎 reactions on a PR's plan comment (sent when the PR closes). */
+export interface FeedbackJob {
+  kind: "feedback";
+  installationId: number;
+  owner: string;
+  repo: string;
+  prNumber: number;
+}
+
+export type OxyqaJob = PrJob | CommandJob | InstallationJob | FeedbackJob;
 
 /** BullMQ queue job name for each job kind. */
 export function jobName(job: OxyqaJob): string {
-  return job.kind === "command" || job.kind === "installation" ? job.kind : "process-pr";
+  return job.kind === "command" || job.kind === "installation" || job.kind === "feedback" ? job.kind : "process-pr";
 }
 
 export function planJobId(job: PrJob): string {
@@ -62,6 +71,11 @@ export function commandJobId(job: Pick<CommandJob, "installationId" | "commentId
  */
 export function installationJobId(job: Pick<InstallationJob, "installationId">, deliveryId: string): string {
   return `installation-${job.installationId}-${createHash("sha256").update(deliveryId).digest("hex").slice(0, 32)}`;
+}
+
+/** Per delivery: a PR can close, reopen and close again, and each close re-collects. */
+export function feedbackJobId(job: Pick<FeedbackJob, "installationId" | "prNumber">, deliveryId: string): string {
+  return `feedback-${job.installationId}-${job.prNumber}-${createHash("sha256").update(deliveryId).digest("hex").slice(0, 32)}`;
 }
 
 /**

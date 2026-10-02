@@ -4,7 +4,7 @@ import test from "node:test";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { installations, plans, type Database } from "@oxyqa/db";
-import { syncInstallation, type GitHubInstallation } from "../src/installations.js";
+import { purgeUninstalled, syncInstallation, type GitHubInstallation } from "../src/installations.js";
 
 test("installation sync mirrors GitHub state in embedded PostgreSQL", async (t) => {
   const client = new PGlite();
@@ -50,5 +50,16 @@ test("installation sync mirrors GitHub state in embedded PostgreSQL", async (t) 
     assert.equal((await db.select().from(plans)).length, 1);
     assert.equal(await sync(99), "deleted", "unknown deleted installs do not create rows");
     assert.equal((await db.select().from(installations)).length, 3);
+  });
+  await t.test("retention: only installs uninstalled 30+ days ago are purged, with all their data", async () => {
+    const day = 86_400_000;
+    const now = new Date();
+    assert.equal(await purgeUninstalled(db as unknown as Database, now), 0, "a fresh uninstall is kept");
+    assert.equal(await purgeUninstalled(db as unknown as Database, new Date(now.getTime() + 29 * day)), 0);
+    assert.equal(await purgeUninstalled(db as unknown as Database, new Date(now.getTime() + 31 * day)), 1);
+    const left = await db.select().from(installations);
+    assert.deepEqual(left.map((r) => r.id).sort(), [2, 3], "active installs are never purged");
+    assert.equal((await db.select().from(plans)).length, 0, "plans cascade with the installation");
+    assert.equal(await purgeUninstalled(db as unknown as Database, new Date(now.getTime() + 31 * day)), 0, "idempotent");
   });
 });

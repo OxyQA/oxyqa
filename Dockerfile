@@ -1,0 +1,33 @@
+# One image for both services (self-hosted packaging, Phase 4). The service is
+# chosen by the container command — see docker-compose.yml.
+#
+# Runs TypeScript through tsx, exactly like the hosted deployment, so
+# self-hosted and cloud execute the same code path. (Bundling with tsup is a
+# later size optimization — DECISIONS.md §7.)
+FROM node:22-slim
+
+ENV PNPM_HOME=/pnpm \
+    PATH=/pnpm:$PATH \
+    NODE_ENV=production \
+    CI=true
+RUN corepack enable
+
+WORKDIR /app
+
+# Dependency layer: only manifests, so source edits don't reinstall.
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY apps/webhook/package.json apps/webhook/
+COPY apps/worker/package.json apps/worker/
+COPY apps/dashboard/package.json apps/dashboard/
+COPY packages/core/package.json packages/core/
+COPY packages/db/package.json packages/db/
+# Dev dependencies stay: tsx runs the services and drizzle-kit runs migrations.
+RUN pnpm install --frozen-lockfile --prod=false
+
+COPY tsconfig.base.json turbo.json ./
+COPY apps apps
+COPY packages packages
+
+USER node
+EXPOSE 3001
+CMD ["pnpm", "--filter", "@oxyqa/worker", "start"]

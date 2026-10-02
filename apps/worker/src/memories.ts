@@ -1,6 +1,6 @@
 import { MEMORY_LIMIT, type CommandJob } from "@oxyqa/core";
 import { repoMemories, type Database } from "@oxyqa/db";
-import { and, desc, eq, ilike } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray } from "drizzle-orm";
 
 type RepoScope = Pick<CommandJob, "installationId" | "owner" | "repo">;
 // GitHub repository names are case-insensitive; normalize writes and reads.
@@ -22,6 +22,20 @@ export function createMemoryStore(db: Database) {
     async forget(scope: RepoScope, match: string) {
       const rows = await db.update(repoMemories).set({ active: false })
         .where(and(memoryScope(scope), eq(repoMemories.active, true), ilike(repoMemories.content, literalPattern(match))))
+        .returning({ id: repoMemories.id });
+      return rows.length;
+    },
+    /** Active memories with ids, newest first — the list a natural-language forget chooses from. */
+    async list(scope: RepoScope) {
+      return db.select({ id: repoMemories.id, content: repoMemories.content }).from(repoMemories)
+        .where(and(memoryScope(scope), eq(repoMemories.active, true)))
+        .orderBy(desc(repoMemories.createdAt), desc(repoMemories.id)).limit(50);
+    },
+    /** Ids outside the scope are ignored, so a routed forget cannot cross repositories. */
+    async forgetIds(scope: RepoScope, ids: string[]) {
+      if (!ids.length) return 0;
+      const rows = await db.update(repoMemories).set({ active: false })
+        .where(and(memoryScope(scope), eq(repoMemories.active, true), inArray(repoMemories.id, ids)))
         .returning({ id: repoMemories.id });
       return rows.length;
     },
