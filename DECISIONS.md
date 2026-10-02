@@ -213,9 +213,12 @@ is tens of commands. Measured client-side, an idle worker alone sends 39
 commands / 90 s on defaults and **2 / 90 s with `drainDelay: 60`,
 `stalledInterval: 120s`** (now set), with job pickup still ~0.1–0.2 s. Cost:
 a job orphaned by a crashed worker retries after ≤2 min instead of 30 s.
-**Re-measure staging after this deploys** before deciding whether the Upstash
-free tier (500K/month) can replace the $10 fixed plan — the worker loop was
-not the whole 219, so do not assume it fits. Dev Redis stays free; run the dev
+**Re-measured on staging after deploy (2026-10-02):** Upstash's own counter
+registered no commands across two quiet 120 s windows (was 219), in line with
+the client-side figure. Idle cost is now negligible; a plan job costs tens to
+low hundreds of commands. The free tier (500K/month) looks sufficient for
+staging and an early beta — confirm against the Upstash dashboard's daily
+count for a few days before downgrading the $10 plan. Dev Redis stays free; run the dev
 worker only while testing.
 
 **Incident 2026-10-02 (staging worker down ~03:50–fix):** #17 added a root
