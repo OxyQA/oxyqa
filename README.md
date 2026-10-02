@@ -77,6 +77,12 @@ pnpm --filter @oxyqa/webhook dev
 npx smee -u <smee-url> -t http://localhost:3001/webhooks/github
 ```
 
+## Self-hosting
+
+`docker compose up -d` runs the whole product (webhook, worker, Postgres, Redis)
+on your own infrastructure with your own model key — see
+[docs/SELF_HOSTING.md](docs/SELF_HOSTING.md).
+
 ## Develop without paid services
 
 After installing dependencies, these checks need no credentials, hosted database,
