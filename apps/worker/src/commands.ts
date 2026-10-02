@@ -1,4 +1,4 @@
-import { commandHelp, commandJobId, type CommandJob, type Interpretation, type PrJob } from "@oxyqa/core";
+import { commandHelp, commandJobId, describeFailure, type CommandJob, type Interpretation, type PrJob } from "@oxyqa/core";
 import type { TrackingIssueResult } from "./tracking-issue.js";
 
 export interface CommandDependencies {
@@ -92,4 +92,22 @@ export async function processCommand(job: CommandJob, deps: CommandDependencies)
   }
   await deps.acknowledge(job, reply);
   return routed ? { command: "freeform", interpreted: action.type } : { command: command.type };
+}
+
+/**
+ * Runs a command and, when its final attempt fails, tells the commenter
+ * instead of failing silently. The reply reuses the command's own marker, so
+ * it lands in the same comment a successful retry would have written. The
+ * original error is always rethrown for the queue and error reporting.
+ */
+export async function runCommand(job: CommandJob, isFinalAttempt: boolean, deps: CommandDependencies) {
+  try {
+    return await processCommand(job, deps);
+  } catch (err) {
+    if (isFinalAttempt) {
+      await deps.acknowledge(job, `I couldn't complete that: ${describeFailure(err)}. Nothing may have changed — post the comment again to retry.`)
+        .catch((e) => console.error(`[oxyqa-worker] command ${job.commentId} — could not report failure:`, (e as Error).message));
+    }
+    throw err;
+  }
 }

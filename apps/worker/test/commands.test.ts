@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { processCommand, type CommandDependencies } from "../src/commands.js";
+import { processCommand, runCommand, type CommandDependencies } from "../src/commands.js";
 import type { CommandJob, PrJob } from "@oxyqa/core";
 
 const base: CommandJob = { kind: "command", installationId: 1, owner: "org", repo: "repo", prNumber: 2, commentId: 3, actor: "alice", command: { type: "regenerate" } };
@@ -131,4 +131,24 @@ test("create issue reports each outcome and is reachable by keyword and by routi
   const denied = fixture({ canWrite: async () => false, createIssue: async () => { called++; return { status: "no-plan" }; } });
   await processCommand(keyword, denied.deps);
   assert.equal(called, 0);
+});
+
+test("a command that fails on its final attempt tells the commenter; earlier attempts stay quiet", async () => {
+  const boom = Object.assign(new Error("db at postgres://secret-host"), { name: "Error" });
+  const early = fixture({ remember: async () => { throw boom; } });
+  const job = { ...base, command: { type: "remember", text: "x" } } as const;
+  await assert.rejects(runCommand(job, false, early.deps), boom);
+  assert.deepEqual(early.effects, [], "a retry is coming, so no reply yet");
+
+  const final = fixture({ remember: async () => { throw boom; } });
+  await assert.rejects(runCommand(job, true, final.deps), boom);
+  assert.equal(final.effects.length, 1);
+  assert.match(final.effects[0]!, /couldn't complete that: an unexpected internal error\. [\s\S]*post the comment again/);
+  assert.doesNotMatch(final.effects[0]!, /secret-host/);
+
+  const github = fixture({ canWrite: async () => { throw Object.assign(new Error("x"), { name: "HttpError", status: 502 }); }, acknowledge: async () => { throw new Error("github down"); } });
+  await assert.rejects(runCommand(job, true, github.deps), /x/, "a failing reply never masks the original error");
+
+  const ok = fixture();
+  assert.deepEqual(await runCommand({ ...base, command: { type: "regenerate" } }, true, ok.deps), { command: "regenerate" });
 });

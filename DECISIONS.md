@@ -156,8 +156,8 @@ Prose context stays in `context.md`. Per-install overrides live in the existing
    comment — a previous plan is never discarded — and the next success
    replaces the whole body. Reasons are fixed user-safe phrases
    (`describeFailure`); raw errors stay in worker logs. Stale/closed PRs and
-   runs overtaken by a later success stay quiet. Command-job failures are
-   still silent (log only) — revisit if users hit it.
+   runs overtaken by a later success stay quiet. A command whose final attempt
+   fails gets a reply with the same safe reason and "post the comment again".
 3. **Observability:** built, **off until keys are set** (SDKs load lazily).
    Sentry (`SENTRY_DSN`, free tier) in both services: reports a job once, on
    its final attempt, plus unhandled webhook errors; all SDK data collection
@@ -201,12 +201,16 @@ projects (dev + staging use both), and the user has cut paid plans — compare
 Railway-hosted Postgres/Redis (usage-billed, no pause, no command caps)
 against Supabase Pro + Upstash fixed before building prod.
 
-**Redis sizing (measured 2026-10-02):** an idle BullMQ worker + webhook on
-staging issued 219 commands / 120 s ≈ **4.7M commands/month**; per-plan job
-traffic is tens of commands. Upstash free (500K/mo) cannot host an always-on
-worker; the fixed 250MB plan ($10/mo, no command cap) is the right fit and
-user count barely moves the bill. Dev Redis stays free — run the dev worker
-only while testing.
+**Redis sizing (measured 2026-10-02):** staging (webhook + worker, idle)
+issued 219 commands / 120 s ≈ 4.7M/month on BullMQ defaults; per-plan traffic
+is tens of commands. Measured client-side, an idle worker alone sends 39
+commands / 90 s on defaults and **2 / 90 s with `drainDelay: 60`,
+`stalledInterval: 120s`** (now set), with job pickup still ~0.1–0.2 s. Cost:
+a job orphaned by a crashed worker retries after ≤2 min instead of 30 s.
+**Re-measure staging after this deploys** before deciding whether the Upstash
+free tier (500K/month) can replace the $10 fixed plan — the worker loop was
+not the whole 219, so do not assume it fits. Dev Redis stays free; run the dev
+worker only while testing.
 
 ## 6. Phase 3 sketches
 

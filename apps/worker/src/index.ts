@@ -6,7 +6,7 @@ import {
 import { createDb } from "@oxyqa/db";
 import { Worker } from "bullmq";
 import { App } from "octokit";
-import { processCommand } from "./commands.js";
+import { runCommand } from "./commands.js";
 import { collectFeedback } from "./feedback.js";
 import { purgeUninstalled, syncInstallation, type GitHubInstallation } from "./installations.js";
 import { createMemoryStore } from "./memories.js";
@@ -51,7 +51,12 @@ const worker = new Worker<OxyqaJob>(
       const command = job.data;
       const octokit = await githubApp.getInstallationOctokit(command.installationId);
       const scope = { owner: command.owner, repo: command.repo };
-      return processCommand(command, {
+      const acknowledge = async (c: typeof command, text: string) => {
+        const marker = `<!-- oxyqa:command:${c.commentId} -->`;
+        await writeBotComment(octokit, c, slug, marker, `${marker}\n${text}`);
+      };
+      const isFinalAttempt = job.attemptsMade + 1 >= (job.opts.attempts ?? 1);
+      return runCommand(command, isFinalAttempt, {
         slug,
         isPullRequest: async () => {
           try {
@@ -81,10 +86,7 @@ const worker = new Worker<OxyqaJob>(
           return data.state === "open" && !data.draft ? data.head.sha : null;
         },
         enqueue: (data, jobId) => queue.add("process-pr", data, { jobId }),
-        acknowledge: async (c, text) => {
-          const marker = `<!-- oxyqa:command:${c.commentId} -->`;
-          await writeBotComment(octokit, c, slug, marker, `${marker}\n${text}`);
-        },
+        acknowledge,
       });
     }
     const plan = job.data;
@@ -108,7 +110,17 @@ const worker = new Worker<OxyqaJob>(
       throw err;
     }
   },
-  { connection, concurrency: 5 },
+  {
+    connection,
+    concurrency: 5,
+    // Idle cost control (measured 2026-10-02): the defaults poll Redis ~39
+    // times per 90 s when idle (~1.1M commands/month); these settings bring
+    // that to ~2. New jobs still wake the worker at once (~0.1–0.2 s pickup),
+    // because adding a job unblocks the wait. The trade-off is that a job
+    // orphaned by a crashed worker is retried after up to 2 minutes, not 30 s.
+    drainDelay: 60,
+    stalledInterval: 120_000,
+  },
 );
 
 worker.on("completed", (job) => console.log(`[oxyqa-worker] job ${job.id} done`));
