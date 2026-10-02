@@ -61,9 +61,16 @@ test("PR deliveries keep automatic generation and isolate identical SHAs on diff
 
 test("enqueue failure is retryable instead of consuming the event", async () => {
   let attempts = 0;
-  const app = createWebhookApp({ secret, slug: "oxyqa-staging", ping: async () => {}, enqueue: async () => { if (++attempts === 1) throw new Error("offline queue failure"); } });
-  app.onError((_, c) => c.json({ error: "queue unavailable" }, 500));
-  assert.equal((await app.request(request("issue_comment", payload))).status, 500);
+  const reported: unknown[] = [];
+  const app = createWebhookApp({
+    secret, slug: "oxyqa-staging", ping: async () => {},
+    enqueue: async () => { if (++attempts === 1) throw new Error("offline queue failure"); },
+    reportError: (err, context) => reported.push([(err as Error).message, context.event]),
+  });
+  const failed = await app.request(request("issue_comment", payload));
+  assert.equal(failed.status, 500);
+  assert.deepEqual(await failed.json(), { error: "internal error" }, "error detail stays out of the response");
+  assert.deepEqual(reported, [["offline queue failure", "issue_comment"]]);
   assert.equal((await app.request(request("issue_comment", payload))).status, 200);
 });
 

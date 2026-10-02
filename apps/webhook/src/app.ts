@@ -25,11 +25,18 @@ export interface WebhookDependencies {
   slug: string;
   ping(): Promise<unknown>;
   enqueue(job: OxyqaJob, id: string): Promise<unknown>;
+  /** Unhandled route errors (e.g. Redis down). GitHub sees a 500 and redelivers. */
+  reportError?(err: unknown, context: { event?: string }): void;
 }
 
 /** No connections at import time: signed webhook tests run entirely offline. */
 export function createWebhookApp(deps: WebhookDependencies) {
   const app = new Hono();
+  app.onError((err, c) => {
+    console.error("[oxyqa-webhook] unhandled error:", err.message);
+    deps.reportError?.(err, { event: c.req.header("x-github-event") });
+    return c.json({ error: "internal error" }, 500);
+  });
   app.get("/", (c) => c.json({ service: "oxyqa-webhook", ok: true }));
   app.get("/health", async (c) => {
     try { await deps.ping(); return c.json({ ok: true, redis: "up" }); }

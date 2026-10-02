@@ -10,6 +10,7 @@
 //   - context     Phase 2: .oxyqa/context.md / README and repo memories, budgeted
 //   - commands    explicit reply-to-agent command parsing
 //   - limits      free-tier gating: per-install monthly plan cap
+//   - observability optional Sentry error reporting + Langfuse LLM tracing
 //   - repo-config Phase 2: .oxyqa/config.yml behavior knobs (defaults ← yml ← install)
 //
 // Planned (Phase 2+):
@@ -29,3 +30,4 @@ export * from "./llm/schema.js";
 export * from "./llm/generate.js";
 export * from "./output/comment.js";
 export * from "./output/failure.js";
+export * from "./observability.js";

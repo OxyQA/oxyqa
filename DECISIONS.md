@@ -131,9 +131,15 @@ Prose context stays in `context.md`. Per-install overrides live in the existing
    (`describeFailure`); raw errors stay in worker logs. Stale/closed PRs and
    runs overtaken by a later success stay quiet. Command-job failures are
    still silent (log only) — revisit if users hit it.
-3. **Observability:** Sentry (free tier) in both services at first external
-   user; Langfuse **Cloud** free tier during beta (self-host it only when the
-   self-hosted product tier ships). Structured logging (pino) is low priority.
+3. **Observability:** built, **off until keys are set** (SDKs load lazily).
+   Sentry (`SENTRY_DSN`, free tier) in both services: reports a job once, on
+   its final attempt, plus unhandled webhook errors; all SDK data collection
+   that could carry customer code is disabled (HTTP bodies, gen-AI I/O, queue
+   args, local variables). Langfuse **Cloud** free tier during beta
+   (`LANGFUSE_PUBLIC_KEY`/`SECRET_KEY`/`HOST`): one generation per model call
+   with prompt, output, tokens (incl. cache) and latency — this **does** send
+   diffs to Langfuse, so it must be named in the privacy note; self-host it
+   when the self-hosted tier ships. Structured logging (pino) is low priority.
 4. **Free-tier gating:** enforced in the worker pre-LLM. Counts `usage` rows
    (every model run, including regenerations) per installation per **UTC
    calendar month**; default cap **50/mo** (`FREE_MONTHLY_PLAN_LIMIT`).

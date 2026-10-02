@@ -55,7 +55,8 @@ export interface PlanDependencies {
   octokit: Octokit;
   slug: string;
   model: string;
-  generate(input: PromptInput): Promise<GenerateResult>;
+  /** `metadata` carries ids only, for LLM tracing. */
+  generate(input: PromptInput, metadata?: Record<string, string | number>): Promise<GenerateResult>;
   /** Cloud installs are capped per month; self-hosted is unlimited. Defaults to cloud. */
   mode?: "cloud" | "self-hosted";
   now?: () => Date;
@@ -144,7 +145,7 @@ export async function processPlan(job: PrJob, { db, octokit, slug, model, genera
     repoMemories: formatRepoMemories(await memories.load({ installationId, owner, repo })),
     oneShotFocus,
     behavior: { maxCases: repoConfig.maxCases, focusAreas: repoConfig.focusAreas },
-  });
+  }, { installationId, repo: `${owner}/${repo}`, prNumber, headSha });
   log(
     `generated ${plan.testCases.length} test cases (${tokens.inputTokens}→${tokens.outputTokens} tok, cache read ${tokens.cacheReadInputTokens} / write ${tokens.cacheCreationInputTokens})`,
   );

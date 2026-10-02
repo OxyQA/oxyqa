@@ -29,6 +29,9 @@ loadDotenv(envPath ? { path: envPath } : undefined);
 // own directory (the repo root), not the process cwd which varies per service.
 const envDir = envPath ? dirname(envPath) : process.cwd();
 
+// `.env` files carry empty placeholders (`SENTRY_DSN=`); treat them as unset.
+const optionalString = z.preprocess((v) => (v === "" ? undefined : v), z.string().optional());
+
 const schema = z.object({
   OXYQA_MODE: z.enum(["cloud", "self-hosted"]).default("cloud"),
 
@@ -48,6 +51,14 @@ const schema = z.object({
   LLM_PROVIDER: z.enum(["anthropic", "openai", "azure", "bedrock", "local"]).default("anthropic"),
   LLM_MODEL: z.string().default("claude-sonnet-4-6"),
   ANTHROPIC_API_KEY: z.string().optional(),
+
+  // Observability — all optional; unset means the integration is off.
+  SENTRY_DSN: optionalString,
+  SENTRY_ENVIRONMENT: optionalString,
+  RAILWAY_ENVIRONMENT_NAME: optionalString,
+  LANGFUSE_PUBLIC_KEY: optionalString,
+  LANGFUSE_SECRET_KEY: optionalString,
+  LANGFUSE_HOST: optionalString,
 
   // Ports. WEBHOOK_PORT wins if set; PORT is what Railway/Fly inject.
   WEBHOOK_PORT: z.coerce.number().optional(),
@@ -90,6 +101,15 @@ function load() {
       provider: env.LLM_PROVIDER,
       model: env.LLM_MODEL,
       anthropicApiKey: env.ANTHROPIC_API_KEY,
+    },
+    errorReporting: {
+      dsn: env.SENTRY_DSN,
+      environment: env.SENTRY_ENVIRONMENT ?? env.RAILWAY_ENVIRONMENT_NAME ?? "development",
+    },
+    llmTracing: {
+      publicKey: env.LANGFUSE_PUBLIC_KEY,
+      secretKey: env.LANGFUSE_SECRET_KEY,
+      host: env.LANGFUSE_HOST ?? "https://cloud.langfuse.com",
     },
     webhookPort: env.WEBHOOK_PORT ?? env.PORT ?? 3001,
   };

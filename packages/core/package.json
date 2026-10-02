@@ -19,10 +19,12 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^1.0.5",
+    "@sentry/node": "^11.2.0",
     "ai": "^4.0.18",
     "bullmq": "^5.28.1",
     "dotenv": "^16.4.5",
     "ioredis": "^5.4.1",
+    "langfuse": "^3.39.2",
     "picomatch": "^4.0.5",
     "yaml": "^2.9.0",
     "zod": "^3.23.8"

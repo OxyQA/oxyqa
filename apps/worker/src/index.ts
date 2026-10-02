@@ -1,5 +1,8 @@
 // Runtime wiring: GitHub/Redis/Postgres connections stay out of the tested handlers.
-import { PR_QUEUE_NAME, createPrQueue, createRedisConnection, generateTestPlan, getConfig, type OxyqaJob } from "@oxyqa/core";
+import {
+  PR_QUEUE_NAME, createErrorReporter, createLlmObserver, createPrQueue, createRedisConnection,
+  generateTestPlan, getConfig, type OxyqaJob,
+} from "@oxyqa/core";
 import { createDb } from "@oxyqa/db";
 import { Worker } from "bullmq";
 import { App } from "octokit";
@@ -10,6 +13,8 @@ import { writeBotComment } from "./github-comments.js";
 import { processPlan, reportPlanFailure } from "./plans.js";
 
 const config = getConfig();
+const errors = await createErrorReporter(config.errorReporting, "worker");
+const llmObserver = await createLlmObserver(config.llmTracing);
 const connection = createRedisConnection(config.redisUrl);
 const db = createDb(config.databaseUrl);
 const githubApp = new App({ appId: config.github.appId, privateKey: config.github.privateKey });
@@ -70,7 +75,8 @@ const worker = new Worker<OxyqaJob>(
     const octokit = await githubApp.getInstallationOctokit(plan.installationId);
     try {
       return await processPlan(plan, {
-        db, octokit, slug, mode: config.mode, model: config.llm.model, generate: (input) => generateTestPlan(config.llm, input),
+        db, octokit, slug, mode: config.mode, model: config.llm.model,
+        generate: (input, metadata) => generateTestPlan(config.llm, input, { observer: llmObserver, metadata }),
       });
     } catch (err) {
       // attemptsMade counts earlier failures while this attempt is still running.
@@ -78,7 +84,10 @@ const worker = new Worker<OxyqaJob>(
         const attemptStartedAt = new Date(job.processedOn ?? Date.now());
         await reportPlanFailure(plan, err, { db, octokit, slug, attemptStartedAt })
           .then((r) => console.log(`[oxyqa-worker] PR #${plan.prNumber} — final failure reported: ${JSON.stringify(r)}`))
-          .catch((e) => console.error(`[oxyqa-worker] PR #${plan.prNumber} — could not report failure:`, (e as Error).message));
+          .catch((e) => {
+            console.error(`[oxyqa-worker] PR #${plan.prNumber} — could not report failure:`, (e as Error).message);
+            errors.capture(e, { stage: "report-failure", installationId: plan.installationId, repo: `${plan.owner}/${plan.repo}`, prNumber: plan.prNumber });
+          });
       }
       throw err;
     }
@@ -87,7 +96,21 @@ const worker = new Worker<OxyqaJob>(
 );
 
 worker.on("completed", (job) => console.log(`[oxyqa-worker] job ${job.id} done`));
-worker.on("failed", (job, err) => console.error(`[oxyqa-worker] job ${job?.id} failed:`, err.message));
+worker.on("failed", (job, err) => {
+  console.error(`[oxyqa-worker] job ${job?.id} failed:`, err.message);
+  // Report once per job, on the final attempt (attemptsMade is already incremented here).
+  if (!job || job.attemptsMade >= (job.opts.attempts ?? 1)) {
+    const d = job?.data;
+    errors.capture(err, {
+      kind: d?.kind ?? "plan", installationId: d?.installationId,
+      repo: d && "repo" in d ? `${d.owner}/${d.repo}` : undefined,
+      prNumber: d && "prNumber" in d ? d.prNumber : undefined,
+    });
+  }
+});
+worker.on("error", (err) => errors.capture(err, { stage: "worker" }));
+
+console.log(`[oxyqa-worker] observability: errors=${errors.enabled ? "sentry" : "off"}, llm=${llmObserver ? "langfuse" : "off"}`);
 
 console.log(`[oxyqa-worker] listening on queue "${PR_QUEUE_NAME}"`);
 
@@ -98,6 +121,7 @@ async function shutdown(signal: string) {
   await worker.close();
   await queue.close();
   connection.disconnect();
+  await Promise.all([errors.shutdown(), llmObserver?.shutdown()]);
   process.exit(0);
 }
 process.on("SIGTERM", () => void shutdown("SIGTERM"));

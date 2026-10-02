@@ -39,6 +39,16 @@ staging; prod only moves on a tag.
    | `LLM_PROVIDER` / `LLM_MODEL` | `anthropic` / `claude-sonnet-4-6` |
    | `ANTHROPIC_API_KEY` | the key |
 
+   Optional observability (both services; unset = off):
+
+   | Variable | Value |
+   |---|---|
+   | `SENTRY_DSN` | Sentry project DSN (errors only; no bodies, prompts or variables) |
+   | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | Langfuse project keys (worker only needs them) |
+   | `LANGFUSE_HOST` | `https://cloud.langfuse.com` (EU, default) or `https://us.cloud.langfuse.com` — delete any leftover `http://localhost:3000` value |
+
+   The worker logs `observability: errors=sentry|off, llm=langfuse|off` at boot.
+
    Note: use `GITHUB_APP_PRIVATE_KEY` (inline PEM), **not** `..._PATH` — there is
    no `.pem` file on Railway.
 
