@@ -39,6 +39,6 @@ jobs:
           echo "public tables: $tables"
           test "$tables" -ge 6
       - name: Services load their code in the image
-        run: docker compose run --rm --no-deps worker node --import tsx -e "await import('./apps/worker/src/plans.ts'); await import('./apps/webhook/src/app.ts'); console.log('ok')"
+        run: docker compose run --rm --no-deps worker node --import tsx --input-type=module -e "await import('./apps/worker/src/plans.ts'); await import('./apps/webhook/src/app.ts'); console.log('ok')"
       - if: always()
         run: docker compose down -v
