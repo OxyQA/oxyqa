@@ -9,7 +9,8 @@ function fixture(overrides: Partial<CommandDependencies> = {}) {
   const jobs = new Map<string, PrJob>();
   const deps: CommandDependencies = {
     slug: "oxyqa-staging", canWrite: async () => true, isPullRequest: async () => true,
-    remember: async () => { effects.push("remember"); }, forget: async () => { effects.push("forget"); return 1; },
+    remember: async (_, text) => { effects.push(`remember:${text}`); }, forget: async () => { effects.push("forget"); return 1; },
+    interpret: async () => ({ type: "help" }), forgetIds: async (_, ids) => { effects.push(`forgetIds:${ids.join(",")}`); return ids.length; },
     currentHead: async () => "current-sha", enqueue: async (job, id) => { if (!jobs.has(id)) jobs.set(id, job); },
     acknowledge: async (_, text) => { effects.push(text); }, ...overrides,
   };
@@ -48,7 +49,7 @@ test("focus is only in the requested job, never persisted or leaked to next rege
   const jobs = [...f.jobs.values()];
   assert.equal(jobs[0]!.oneShotFocus, "accessibility");
   assert.equal(jobs[1]!.oneShotFocus, undefined);
-  assert.ok(!f.effects.includes("remember"));
+  assert.ok(!f.effects.some((e) => e.startsWith("remember")));
 });
 
 test("non-PRs, closed PRs and help do not generate", async () => {
@@ -58,4 +59,52 @@ test("non-PRs, closed PRs and help do not generate", async () => {
   await processCommand(base, closed.deps); assert.equal(closed.jobs.size, 0);
   const help = fixture(); await processCommand({ ...base, command: { type: "help" } }, help.deps);
   assert.match(help.effects[0]!, /@oxyqa-staging remember/); assert.equal(help.jobs.size, 0);
+});
+
+test("freeform comments are routed after the permission check and echo their interpretation", async () => {
+  const freeform = { ...base, command: { type: "freeform", text: "from now on check Safari on checkout" } } as const;
+  let interpreted = 0;
+  const denied = fixture({ canWrite: async () => false, interpret: async () => { interpreted++; return { type: "regenerate" }; } });
+  assert.deepEqual(await processCommand(freeform, denied.deps), { denied: true });
+  assert.equal(interpreted, 0, "no model call for unauthorized commenters");
+
+  const remember = fixture({ interpret: async () => ({ type: "remember", text: "Always test checkout in Safari." }) });
+  assert.deepEqual(await processCommand(freeform, remember.deps), { command: "freeform", interpreted: "remember" });
+  assert.equal(remember.effects[0], "remember:Always test checkout in Safari.");
+  assert.match(remember.effects[1]!, /Saved repository guidance:\n\n> Always test checkout in Safari\./);
+
+  const focus = fixture({ interpret: async () => ({ type: "focus", areas: "keyboard access" }) });
+  await processCommand(freeform, focus.deps);
+  assert.equal([...focus.jobs.values()][0]!.oneShotFocus, "keyboard access");
+  assert.match(focus.effects[0]!, /one-time focus on:\n\n> keyboard access/);
+
+  const regenerate = fixture({ interpret: async () => ({ type: "regenerate" }) });
+  await processCommand(freeform, regenerate.deps);
+  assert.equal(regenerate.jobs.size, 1);
+  assert.equal([...regenerate.jobs.values()][0]!.oneShotFocus, undefined);
+});
+
+test("routed forget names what it removed; no match and unclear intent change nothing", async () => {
+  const freeform = { ...base, command: { type: "freeform", text: "drop the safari rule" } } as const;
+  const forget = fixture({ interpret: async () => ({ type: "forget", memories: [{ id: "m1", content: "Always test Safari" }] }) });
+  await processCommand(freeform, forget.deps);
+  assert.deepEqual(forget.effects.slice(0, 1), ["forgetIds:m1"]);
+  assert.match(forget.effects[1]!, /Forgot this repository memory:\n\n- Always test Safari/);
+
+  const none = fixture({ interpret: async () => ({ type: "forget", memories: [] }) });
+  await processCommand(freeform, none.deps);
+  assert.match(none.effects.at(-1)!, /nothing was removed/);
+
+  const unclear = fixture();
+  assert.deepEqual(await processCommand(freeform, unclear.deps), { command: "freeform", interpreted: "help" });
+  assert.match(unclear.effects[0]!, /not sure what to do[\s\S]*@oxyqa-staging remember/);
+  assert.equal(unclear.jobs.size, 0);
+});
+
+test("a router outage degrades to help without retrying or side effects", async () => {
+  const f = fixture({ interpret: async () => { throw new Error("model down"); } });
+  const freeform = { ...base, command: { type: "freeform", text: "please regenerate" } } as const;
+  assert.deepEqual(await processCommand(freeform, f.deps), { command: "freeform", interpreted: "error" });
+  assert.match(f.effects[0]!, /couldn't interpret that just now[\s\S]*exact commands still work/);
+  assert.equal(f.jobs.size, 0);
 });

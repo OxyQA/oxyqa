@@ -97,8 +97,20 @@ only run the worker or `generate:sample` when intentionally testing those servic
 ## Reply to the bot
 
 On a PR, start a new comment with your app's mention (for example,
-`@oxyqa-staging`). Only repository collaborators with write/admin access can
-run commands. Bots, edited comments, and ordinary GitHub Issues are ignored.
+`@oxyqa-staging`) and say what you want in plain language:
+
+> @oxyqa-staging from now on, always include a Safari case for checkout changes
+>
+> @oxyqa-staging try again, but concentrate on accessibility this time
+>
+> @oxyqa-staging stop doing the Safari thing, we dropped support
+
+The bot replies with what it understood — the guidance it saved, the memories it
+removed, or the focus it queued — so a misreading is visible and easy to undo.
+Only repository collaborators with write/admin access can use it. Bots, edited
+comments, and ordinary GitHub Issues are ignored.
+
+Exact commands skip the model call and behave identically:
 
 | Command | Effect |
 |---|---|
@@ -108,10 +120,11 @@ run commands. Bots, edited comments, and ordinary GitHub Issues are ignored.
 | `@oxyqa-staging focus: accessibility` | Regenerate with one-time emphasis, without changing saved guidance |
 
 The app resolves its own slug at startup, so use the dev/staging/prod bot's actual
-mention. Remember/forget inputs allow 2,000 characters; focus allows 1,000. Unknown
-commands return help. Memories are scoped to installation + owner + repository;
-the latest 20 active memories enter the prompt within a ~2k-token budget. Use
-regenerate after remembering or forgetting to apply the change to an existing plan.
+mention. Remember/forget inputs allow 2,000 characters; focus allows 1,000.
+Questions and anything unclear get the help text. Memories are scoped to
+installation + owner + repository; the latest 20 active memories enter the prompt
+within a ~2k-token budget. Use regenerate after remembering or forgetting to
+apply the change to an existing plan.
 
 ## What goes into a plan
 

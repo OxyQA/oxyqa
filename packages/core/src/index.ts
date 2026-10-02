@@ -8,7 +8,7 @@
 //   - llm         provider-agnostic generateObject + Zod test-plan schema
 //   - output      PR-comment renderer (update-in-place marker) + final-failure banner
 //   - context     Phase 2: .oxyqa/context.md / README, repo memories and linked issues, budgeted
-//   - commands    explicit reply-to-agent command parsing
+//   - commands    reply-to-agent: keyword commands + natural-language routing (llm/route)
 //   - limits      free-tier gating: per-install monthly plan cap
 //   - observability optional Sentry error reporting + Langfuse LLM tracing
 //   - repo-config Phase 2: .oxyqa/config.yml behavior knobs (defaults ← yml ← install)
@@ -29,6 +29,7 @@ export * from "./prompt/build.js";
 export * from "./llm/model.js";
 export * from "./llm/schema.js";
 export * from "./llm/generate.js";
+export * from "./llm/route.js";
 export * from "./output/comment.js";
 export * from "./output/failure.js";
 export * from "./observability.js";

@@ -51,6 +51,8 @@ const schema = z.object({
   LLM_PROVIDER: z.enum(["anthropic", "openai", "azure", "bedrock", "local"]).default("anthropic"),
   LLM_MODEL: z.string().default("claude-sonnet-4-6"),
   ANTHROPIC_API_KEY: z.string().optional(),
+  // Small model that routes natural-language replies (see llm/route.ts).
+  LLM_ROUTER_MODEL: optionalString,
 
   // Observability — all optional; unset means the integration is off.
   SENTRY_DSN: optionalString,
@@ -101,6 +103,7 @@ function load() {
       provider: env.LLM_PROVIDER,
       model: env.LLM_MODEL,
       anthropicApiKey: env.ANTHROPIC_API_KEY,
+      routerModel: env.LLM_ROUTER_MODEL ?? (env.LLM_PROVIDER === "anthropic" ? "claude-haiku-4-5" : env.LLM_MODEL),
     },
     errorReporting: {
       dsn: env.SENTRY_DSN,

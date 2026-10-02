@@ -109,6 +109,19 @@ Prose context stays in `context.md`. Per-install overrides live in the existing
   Latest 20 active memories fit a ~2k-token prompt budget.
 - **Regeneration:** new comment = new run at the current open, non-draft head.
   Same-comment retries share a queue ID. Focus lives only in that job/prompt tail.
+- **Natural language** *(user, 2026-10-02; built)*: any other text after the
+  leading mention is `freeform`. The worker — only after the write-access
+  check — routes it with a small model (`LLM_ROUTER_MODEL`, default
+  `claude-haiku-4-5`; structured output: intent + text + memory numbers) to
+  remember / forget / regenerate / focus / none. The router only chooses:
+  `interpretRoutedCommand` re-applies the keyword limits, and forget can only
+  pick from the repository's own listed memories. Replies always echo the
+  interpretation (guidance saved, memories removed, focus queued). Keyword
+  commands stay a no-model fast path; malformed keyword commands get help
+  rather than reinterpretation; a router outage degrades to help with no
+  retry. Router calls are not metered against the monthly cap (≈ $0.001
+  each) — revisit if abused. `pnpm --filter @oxyqa/worker route:sample` is the
+  live regression set (12/12 on 2026-10-02); it never runs in CI.
 - **Ack:** reply comment via existing PR-comment write. (👍-reaction ack needs
   Issues:write — deferred deliberately; Issues stays read-only until Phase 3a.)
 
@@ -192,7 +205,7 @@ only while testing.
 | Debt | Exit |
 |---|---|
 | Prod runs via `tsx` (workspace pkgs resolve to TS source; `node dist` crashes) | Bundle each app with **tsup** during Phase 4 packaging |
-| Opus/Fable reject AI-SDK's default `temperature:0` on structured output (HTTP 400) | In `model.ts`/`generate.ts`, omit sampling params for opus-4-x/fable model ids; implement with paid-tier model selection |
+| Main model is pinned to `claude-sonnet-4-6`. AI SDK v4 `generateObject` sends `temperature: 0` **and forces `tool_choice`**; current models (Sonnet 5.5, Opus 5.x, Fable 5.x) reject one or both with HTTP 400 (checked 2026-10-02). Haiku 4.5 (router) and Sonnet 4.6 accept both | Upgrade `ai` / `@ai-sdk/anthropic` (v4 → current major, which uses native structured outputs) as its own PR with a `generate:sample` + `route:sample` before/after check; do it with paid-tier model selection or when Sonnet 4.6 nears retirement. Omitting sampling params alone is **not** enough |
 | `ioredis` pinned 5.11.1 via pnpm override (bullmq type clash) | Revisit on bullmq major bump only |
 | Dev DB is `db:push`-managed (no migration history) | Acceptable permanently for local; staging/prod are migration-managed from first deploy |
 | `apps/dashboard` is a stub | Phase 5: Next.js on Railway; sign-in = GitHub OAuth via the App (that's when callback URL gets set) |
@@ -209,15 +222,10 @@ only while testing.
   and owns the content. Costs an extra LLM call, so it must respect free-tier
   gating. Trigger: Phase 5 onboarding build, or earlier if README-fallback
   plan quality proves weak in beta.
-- **Natural-language replies** *(user, 2026-10-02)* — CodeRabbit-style: keep
-  the leading @mention + write-access check, but route free text through a
-  small structured-output model call to {remember, forget, regenerate, focus,
-  question, help} with extracted args; exact keyword commands stay a no-LLM
-  fast path. Bot always echoes its interpretation ("Saved: …"); `forget`
-  lists what it deactivated. Follow-ons: answer questions about the plan, and
-  inferred memories (`source: inferred`, column already exists). Counts toward
-  free-tier gating. Trigger: after the MVP gate (§5a), or earlier as a demo
-  differentiator.
+- **Plan Q&A and inferred memories** — follow-ons to natural-language replies
+  (§4): answer questions about the current plan ("why is case 3 critical?"),
+  and learn guidance from ordinary review discussion (`source: inferred`,
+  column exists). Trigger: beta feedback asks for it.
 - **Jira/Xray** — trigger: first enterprise team asks.
 - **Executable test generation** — trigger: checklist edit-rate measured & good.
 - **Prod environment (Railway env #2, `oxyqa-prod` Supabase paid, fixed-Pro

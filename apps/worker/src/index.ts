@@ -1,7 +1,7 @@
 // Runtime wiring: GitHub/Redis/Postgres connections stay out of the tested handlers.
 import {
   PR_QUEUE_NAME, createErrorReporter, createLlmObserver, createPrQueue, createRedisConnection,
-  generateTestPlan, getConfig, type OxyqaJob,
+  generateTestPlan, getConfig, interpretRoutedCommand, routeCommand, type OxyqaJob,
 } from "@oxyqa/core";
 import { createDb } from "@oxyqa/db";
 import { Worker } from "bullmq";
@@ -60,6 +60,16 @@ const worker = new Worker<OxyqaJob>(
         },
         remember: (c, text) => memories.remember(c, text),
         forget: (c, match) => memories.forget(c, match),
+        interpret: async (c, text) => {
+          const saved = await memories.list(c);
+          const routed = await routeCommand(
+            { ...config.llm, model: config.llm.routerModel },
+            { comment: text, memories: saved.map((m) => m.content) },
+            { observer: llmObserver, metadata: { installationId: c.installationId, repo: `${c.owner}/${c.repo}`, prNumber: c.prNumber } },
+          );
+          return interpretRoutedCommand(routed, saved);
+        },
+        forgetIds: (c, ids) => memories.forgetIds(c, ids),
         currentHead: async () => {
           const { data } = await octokit.rest.pulls.get({ ...scope, pull_number: command.prNumber });
           return data.state === "open" && !data.draft ? data.head.sha : null;

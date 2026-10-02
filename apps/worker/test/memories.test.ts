@@ -58,6 +58,18 @@ test("migrations and memory persistence work in embedded PostgreSQL without host
     const rows = await store.load({ ...job, repo: "many" });
     assert.equal(rows.length, 20); assert.equal(rows[0]!.content, "memory 24"); assert.equal(rows[19]!.content, "memory 5");
   });
+  await t.test("forgetIds only deactivates listed memories inside the caller's repository", async () => {
+    const other = { ...job, repo: "OtherRepo" };
+    const mine = await store.list(job);
+    const theirs = await store.list(other);
+    assert.ok(mine.length > 0 && theirs.length > 0);
+    assert.equal(await store.forgetIds(job, [theirs[0]!.id]), 0, "ids from another repository are ignored");
+    assert.equal((await store.list(other)).length, theirs.length);
+    assert.equal(await store.forgetIds(job, [mine[0]!.id, mine[0]!.id]), 1);
+    assert.equal(await store.forgetIds(job, [mine[0]!.id]), 0, "already forgotten");
+    assert.equal(await store.forgetIds(job, []), 0);
+    assert.ok(!(await store.list(job)).some((m) => m.id === mine[0]!.id));
+  });
   await t.test("removing an installation cascades its memories only", async () => {
     await db.delete(installations).where(eq(installations.id, 1));
     const rows = await db.select().from(repoMemories);

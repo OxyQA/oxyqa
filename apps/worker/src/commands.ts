@@ -1,4 +1,4 @@
-import { commandHelp, commandJobId, type CommandJob, type PrJob } from "@oxyqa/core";
+import { commandHelp, commandJobId, type CommandJob, type Interpretation, type PrJob } from "@oxyqa/core";
 
 export interface CommandDependencies {
   slug: string;
@@ -6,10 +6,15 @@ export interface CommandDependencies {
   isPullRequest(job: CommandJob): Promise<boolean>;
   remember(job: CommandJob, text: string): Promise<void>;
   forget(job: CommandJob, match: string): Promise<number>;
+  /** Routes free text to an action (model call). */
+  interpret(job: CommandJob, text: string): Promise<Interpretation>;
+  forgetIds(job: CommandJob, ids: string[]): Promise<number>;
   currentHead(job: CommandJob): Promise<string | null>;
   enqueue(job: PrJob, id: string): Promise<unknown>;
   acknowledge(job: CommandJob, text: string): Promise<void>;
 }
+
+const quote = (text: string) => text.split("\n").map((l) => `> ${l}`).join("\n");
 
 /** GitHub permission is checked at execution time, never inferred from author_association. */
 export async function processCommand(job: CommandJob, deps: CommandDependencies) {
@@ -19,15 +24,39 @@ export async function processCommand(job: CommandJob, deps: CommandDependencies)
     return { denied: true };
   }
   const command = job.command;
+  // Free text is routed only after the permission check, and its result is
+  // always echoed so a misreading is visible and reversible.
+  let action: Interpretation | { type: "forget-match"; match: string };
+  const routed = command.type === "freeform";
+  if (command.type === "freeform") {
+    try { action = await deps.interpret(job, command.text); }
+    catch (err) {
+      console.error(`[oxyqa-worker] command ${job.commentId} — could not interpret:`, (err as Error).message);
+      await deps.acknowledge(job, `I couldn't interpret that just now. The exact commands still work:\n\n${commandHelp(deps.slug)}`);
+      return { command: "freeform", interpreted: "error" };
+    }
+  } else if (command.type === "forget") action = { type: "forget-match", match: command.match };
+  else if (command.type === "focus") action = { type: "focus", areas: command.areas };
+  else action = command;
+
   let reply: string;
-  switch (command.type) {
+  switch (action.type) {
     case "remember":
-      await deps.remember(job, command.text);
-      reply = "Saved repository guidance. It will apply to future plans; use regenerate to update this PR's plan.";
+      await deps.remember(job, action.text);
+      reply = routed
+        ? `Saved repository guidance:\n\n${quote(action.text)}\n\nIt will apply to future plans; use regenerate to update this PR's plan. If I got it wrong, tell me to forget it.`
+        : "Saved repository guidance. It will apply to future plans; use regenerate to update this PR's plan.";
       break;
-    case "forget": {
-      const count = await deps.forget(job, command.match);
+    case "forget-match": {
+      const count = await deps.forget(job, action.match);
       reply = count ? `Forgot ${count} matching repository ${count === 1 ? "memory" : "memories"}.` : "No active repository memories match that text.";
+      break;
+    }
+    case "forget": {
+      const count = await deps.forgetIds(job, action.memories.map((m) => m.id));
+      reply = count
+        ? `Forgot ${count === 1 ? "this repository memory" : `these ${count} repository memories`}:\n\n${action.memories.map((m) => `- ${m.content}`).join("\n")}`
+        : "I couldn't find a saved repository memory matching that, so nothing was removed.";
       break;
     }
     case "focus":
@@ -40,13 +69,16 @@ export async function processCommand(job: CommandJob, deps: CommandDependencies)
       await deps.enqueue({
         kind: "plan", installationId: job.installationId, owner: job.owner,
         repo: job.repo, prNumber: job.prNumber, headSha, action: "command",
-        ...(command.type === "focus" ? { oneShotFocus: command.areas } : {}),
+        ...(action.type === "focus" ? { oneShotFocus: action.areas } : {}),
       }, `regenerate-${commandJobId(job)}`);
-      reply = command.type === "focus" ? "Queued a new plan with one-time focus. Saved repository guidance is unchanged." : "Queued a new plan for the current PR head.";
+      if (action.type !== "focus") reply = "Queued a new plan for the current PR head.";
+      else if (routed) reply = `Queued a new plan with one-time focus on:\n\n${quote(action.areas)}\n\nSaved repository guidance is unchanged.`;
+      else reply = "Queued a new plan with one-time focus. Saved repository guidance is unchanged.";
       break;
     }
-    default: reply = commandHelp(deps.slug);
+    default:
+      reply = routed ? `I'm not sure what to do with that. Here's what I can do:\n\n${commandHelp(deps.slug)}` : commandHelp(deps.slug);
   }
   await deps.acknowledge(job, reply);
-  return { command: command.type };
+  return routed ? { command: "freeform", interpreted: action.type } : { command: command.type };
 }
