@@ -1,5 +1,5 @@
 import { verify } from "@octokit/webhooks-methods";
-import { commandJobId, installationJobId, parseAgentCommand, planJobId, type OxyqaJob } from "@oxyqa/core";
+import { commandJobId, feedbackJobId, installationJobId, parseAgentCommand, planJobId, type OxyqaJob } from "@oxyqa/core";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -85,6 +85,12 @@ export function createWebhookApp(deps: WebhookDependencies) {
     const parsed = prEvent.safeParse(payload);
     if (!parsed.success) return c.json({ error: "invalid pull request event" }, 400);
     const p = parsed.data;
+    if (p.action === "closed") {
+      // Reactions have no webhook; the close event is the cue to collect them.
+      const job = { kind: "feedback" as const, installationId: p.installation.id, owner: p.repository.owner.login, repo: p.repository.name, prNumber: p.pull_request.number };
+      await deps.enqueue(job, feedbackJobId(job, c.req.header("x-github-delivery") ?? raw));
+      return c.json({ ok: true, queued: "feedback" });
+    }
     if (!actions.has(p.action) || p.pull_request.draft) return c.json({ ok: true, skipped: p.action });
     const job = {
       installationId: p.installation.id, owner: p.repository.owner.login,

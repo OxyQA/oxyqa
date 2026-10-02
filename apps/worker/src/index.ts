@@ -7,6 +7,7 @@ import { createDb } from "@oxyqa/db";
 import { Worker } from "bullmq";
 import { App } from "octokit";
 import { processCommand } from "./commands.js";
+import { collectFeedback } from "./feedback.js";
 import { syncInstallation, type GitHubInstallation } from "./installations.js";
 import { createMemoryStore } from "./memories.js";
 import { writeBotComment } from "./github-comments.js";
@@ -43,6 +44,9 @@ const worker = new Worker<OxyqaJob>(
       return { installation: state };
     }
     if (state !== "active") return { skipped: `installation ${state}` };
+    if (job.data.kind === "feedback") {
+      return collectFeedback(job.data, { db, octokit: await githubApp.getInstallationOctokit(job.data.installationId) });
+    }
     if (job.data.kind === "command") {
       const command = job.data;
       const octokit = await githubApp.getInstallationOctokit(command.installationId);

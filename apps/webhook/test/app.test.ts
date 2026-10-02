@@ -88,3 +88,12 @@ test("install lifecycle events queue one job per delivery, without a repository"
   assert.equal((await app.request(request("installation", install, false, "d-5"))).status, 401);
   assert.equal(jobs.size, 3);
 });
+
+test("closing a PR queues feedback collection per delivery and never a plan", async () => {
+  const { app, jobs } = fixture();
+  const closed = { ...payload, action: "closed", pull_request: { number: 5, head: { sha: "a".repeat(40) } } };
+  await app.request(request("pull_request", closed, true, "c-1"));
+  await app.request(request("pull_request", closed, true, "c-1"));
+  await app.request(request("pull_request", closed, true, "c-2"));
+  assert.deepEqual([...jobs.values()], Array(2).fill({ kind: "feedback", installationId: 42, owner: "org", repo: "repo", prNumber: 5 }));
+});

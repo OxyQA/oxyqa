@@ -176,6 +176,15 @@ Prose context stays in `context.md`. Per-install overrides live in the existing
    plan comment. Soft cap — concurrent jobs can overshoot by up to the worker
    concurrency (5). Set the dogfood install on staging to `"unlimited"`.
 
+5. **Feedback + metrics (built):** when a PR closes, the worker snapshots
+   human 👍/👎 reactions on the plan comment into `feedback` (reactions have
+   no webhook; re-collection replaces rows). `pnpm --filter @oxyqa/worker
+   metrics [days]` prints installs, plans by status, model runs per posted
+   plan (regenerate rate), tokens, feedback and tracking issues straight from
+   the database. **No product-analytics service until there is a web surface**
+   (landing page/dashboard, Phase 5) — the product lives inside GitHub and the
+   database already holds its funnel.
+
 ## 5a. MVP gate — "outside teams can install it" *(proposed 2026-10-02, pending user OK)*
 
 Demo on own repos works today via the staging App. Both Apps are private

@@ -135,6 +135,17 @@ issues** — referenced in the PR title or body (`Fixes #12`, `#12`, an issue UR
 or implied by the branch name (`12-add-lockout`). Tune behavior with
 `.oxyqa/config.yml` (`maxCases`, `focusAreas`, `skipPaths`, `commentStyle`).
 
+## Is it working? (metrics)
+
+```bash
+pnpm --filter @oxyqa/worker metrics        # last 30 days, database from .env
+railway run --service @oxyqa/worker --environment staging pnpm --filter @oxyqa/worker metrics 7
+```
+
+Prints installs, plans by status, model runs per posted plan (how often people
+regenerate), token totals, 👍/👎 on plan comments (collected when a PR closes),
+active memories and tracking issues.
+
 ## Build order (from the roadmap)
 
 - ✅ **Phase 0** — Foundations: monorepo skeleton (this), register dev GitHub App, local webhook tunnel (smee/cloudflared), `@octokit/auth-app`, local Postgres in Docker, Drizzle schema.
