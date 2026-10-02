@@ -24,3 +24,21 @@ jobs:
       - run: pnpm test
       - run: pnpm typecheck
       - run: pnpm build
+
+  # Self-hosted packaging: the image must build and migrate an empty Postgres.
+  self-host:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: cp .env.example .env
+      - run: docker compose build migrate
+      - run: docker compose run --rm migrate
+      - name: Schema is present
+        run: |
+          tables=$(docker compose exec -T postgres psql -U oxyqa -d oxyqa -Atc "select count(*) from information_schema.tables where table_schema='public'")
+          echo "public tables: $tables"
+          test "$tables" -ge 6
+      - name: Services load their code in the image
+        run: docker compose run --rm --no-deps worker node --import tsx -e "await import('./apps/worker/src/plans.ts'); await import('./apps/webhook/src/app.ts'); console.log('ok')"
+      - if: always()
+        run: docker compose down -v

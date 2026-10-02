@@ -1,0 +1,15 @@
+# Never bake secrets or local state into the image.
+.env
+.env.*
+!.env.example
+*.pem
+.git
+.github
+node_modules
+**/node_modules
+**/dist
+.turbo
+**/.turbo
+.pnpm-store
+.DS_Store
+docs
