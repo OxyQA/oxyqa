@@ -8,7 +8,7 @@ import { Worker } from "bullmq";
 import { App } from "octokit";
 import { processCommand } from "./commands.js";
 import { collectFeedback } from "./feedback.js";
-import { syncInstallation, type GitHubInstallation } from "./installations.js";
+import { purgeUninstalled, syncInstallation, type GitHubInstallation } from "./installations.js";
 import { createMemoryStore } from "./memories.js";
 import { writeBotComment } from "./github-comments.js";
 import { processPlan, reportPlanFailure } from "./plans.js";
@@ -129,6 +129,20 @@ worker.on("error", (err) => errors.capture(err, { stage: "worker" }));
 console.log(`[oxyqa-worker] observability: errors=${errors.enabled ? "sentry" : "off"}, llm=${llmObserver ? "langfuse" : "off"}`);
 
 console.log(`[oxyqa-worker] listening on queue "${PR_QUEUE_NAME}"`);
+
+// Retention: purge data of installations uninstalled more than 30 days ago.
+// Runs at boot and every 6 hours; failures are reported and retried next tick.
+async function purge() {
+  try {
+    const purged = await purgeUninstalled(db);
+    if (purged) console.log(`[oxyqa-worker] retention: purged ${purged} uninstalled installation(s)`);
+  } catch (err) {
+    console.error("[oxyqa-worker] retention purge failed:", (err as Error).message);
+    errors.capture(err, { stage: "retention" });
+  }
+}
+void purge();
+setInterval(() => void purge(), 6 * 3_600_000).unref();
 
 // Graceful shutdown: worker.close() waits for active jobs to finish before
 // resolving, so a Railway redeploy never kills a plan mid-generation.

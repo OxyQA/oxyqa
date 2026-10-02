@@ -143,8 +143,10 @@ Prose context stays in `context.md`. Per-install overrides live in the existing
    Account type comes from GitHub (`User`/`Organization`, `Enterprise` for
    enterprise accounts, `Unknown` if absent) — never defaulted.
    **Uninstall = soft delete** (`installations.deleted_at`); plans, memories
-   and usage are kept (installation ids are never reused). A retention purge
-   for deleted installs is deferred to the privacy/terms work before public beta.
+   and usage are kept (installation ids are never reused). **Retention: 30 days** after
+   uninstall the worker hard-deletes the installation and everything under it
+   (`purgeUninstalled`, at boot and every 6 h) — the figure `docs/public/PRIVACY.md`
+   promises; change both together.
 2. **Failure UX:** after final retry, set plan `status=failed` and post/update
    the PR comment with a one-line reason + "`@<slug> regenerate` to retry".
    Decision: **comment-first UX; Check Runs stay unused** until exec-test era

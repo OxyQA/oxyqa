@@ -1,5 +1,5 @@
 import { installations, type Database } from "@oxyqa/db";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, lt } from "drizzle-orm";
 
 /** The subset of GitHub's installation object this sync reads. */
 export interface GitHubInstallation {
@@ -43,4 +43,18 @@ export async function syncInstallation(
   await db.insert(installations).values({ id: installationId, ...values })
     .onConflictDoUpdate({ target: installations.id, set: values });
   return values.suspendedAt ? "suspended" : "active";
+}
+
+/** Days an uninstalled installation's data is kept before it is purged (PRIVACY.md). */
+export const UNINSTALL_RETENTION_DAYS = 30;
+
+/**
+ * Hard-deletes installations uninstalled more than the retention period ago.
+ * Plans, test cases, memories, usage and feedback go with them (FK cascade).
+ * Idempotent, so every worker replica may run it.
+ */
+export async function purgeUninstalled(db: Database, now = new Date(), retentionDays = UNINSTALL_RETENTION_DAYS): Promise<number> {
+  const cutoff = new Date(now.getTime() - retentionDays * 86_400_000);
+  const rows = await db.delete(installations).where(lt(installations.deletedAt, cutoff)).returning({ id: installations.id });
+  return rows.length;
 }
