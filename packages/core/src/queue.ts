@@ -33,7 +33,19 @@ export interface CommandJob {
   command: AgentCommand;
 }
 
-export type OxyqaJob = PrJob | CommandJob;
+/** Install lifecycle event; the worker re-reads current state from GitHub. */
+export interface InstallationJob {
+  kind: "installation";
+  installationId: number;
+  action: string;
+}
+
+export type OxyqaJob = PrJob | CommandJob | InstallationJob;
+
+/** BullMQ queue job name for each job kind. */
+export function jobName(job: OxyqaJob): string {
+  return job.kind === "command" || job.kind === "installation" ? job.kind : "process-pr";
+}
 
 export function planJobId(job: PrJob): string {
   const scope = [job.installationId, job.owner.toLowerCase(), job.repo.toLowerCase(), job.prNumber, job.headSha];
@@ -42,6 +54,14 @@ export function planJobId(job: PrJob): string {
 
 export function commandJobId(job: Pick<CommandJob, "installationId" | "commentId">): string {
   return `command-${job.installationId}-${job.commentId}`;
+}
+
+/**
+ * One job per delivery, never per installation: retained completed jobs would
+ * otherwise swallow a later suspend/unsuspend for the same installation.
+ */
+export function installationJobId(job: Pick<InstallationJob, "installationId">, deliveryId: string): string {
+  return `installation-${job.installationId}-${createHash("sha256").update(deliveryId).digest("hex").slice(0, 32)}`;
 }
 
 /**

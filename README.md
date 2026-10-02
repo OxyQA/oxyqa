@@ -32,11 +32,10 @@ oxyqa/
 └── tsconfig.base.json
 ```
 
-> **Status:** Phases 0–1 and Phase 2 repo context/configuration are built;
-> reply commands and repository memory are implemented on the Phase 2 PR 3 branch.
-> The core loop was verified on staging, but live validation is currently blocked
-> by an unavailable staging database. Offline tests do not need hosted services.
-> See [DECISIONS.md](DECISIONS.md) for the current resume state.
+> **Status:** Phases 0–2 (core loop, repo context, `.oxyqa/config.yml`, reply
+> commands and repository memory) are built and deployed to staging. Current work
+> is the pre-beta robustness ladder (install lifecycle, failure UX). Offline tests
+> do not need hosted services. See [DECISIONS.md](DECISIONS.md) for the resume state.
 
 ## Tech stack
 

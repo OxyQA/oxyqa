@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server";
-import { createPrQueue, createRedisConnection, getConfig } from "@oxyqa/core";
+import { createPrQueue, createRedisConnection, getConfig, jobName } from "@oxyqa/core";
 import { App } from "octokit";
 import { createWebhookApp } from "./app.js";
 
@@ -13,7 +13,7 @@ const app = createWebhookApp({
   secret: config.github.webhookSecret,
   slug: identity.slug,
   ping: () => redis.ping(),
-  enqueue: (job, jobId) => queue.add(job.kind === "command" ? "command" : "process-pr", job, { jobId }),
+  enqueue: (job, jobId) => queue.add(jobName(job), job, { jobId }),
 });
 const server = serve({ fetch: app.fetch, port: config.webhookPort }, (info) => {
   console.log(`[oxyqa-webhook] listening on :${info.port}`);

@@ -1,9 +1,10 @@
 // Runtime wiring: GitHub/Redis/Postgres connections stay out of the tested handlers.
 import { PR_QUEUE_NAME, createPrQueue, createRedisConnection, generateTestPlan, getConfig, type OxyqaJob } from "@oxyqa/core";
-import { createDb, installations } from "@oxyqa/db";
+import { createDb } from "@oxyqa/db";
 import { Worker } from "bullmq";
 import { App } from "octokit";
 import { processCommand } from "./commands.js";
+import { syncInstallation, type GitHubInstallation } from "./installations.js";
 import { createMemoryStore } from "./memories.js";
 import { writeBotComment } from "./github-comments.js";
 import { processPlan } from "./plans.js";
@@ -19,18 +20,23 @@ const slug = identity.slug;
 const queue = createPrQueue(connection);
 const memories = createMemoryStore(db);
 
-async function ensureInstallation(installationId: number) {
-  const { data } = await githubApp.octokit.rest.apps.getInstallation({ installation_id: installationId });
-  if (data.suspended_at) throw new Error("GitHub App installation is suspended");
-  await db.insert(installations).values({
-    id: installationId, accountLogin: data.account && "login" in data.account ? data.account.login : "unknown",
-    accountType: data.account && "type" in data.account ? data.account.type : "Organization",
-  }).onConflictDoNothing();
+async function fetchInstallation(installationId: number): Promise<GitHubInstallation | null> {
+  try {
+    const { data } = await githubApp.octokit.rest.apps.getInstallation({ installation_id: installationId });
+    return data as GitHubInstallation;
+  } catch (err) { if ((err as { status?: number }).status === 404) return null; throw err; }
 }
 
 const worker = new Worker<OxyqaJob>(
   PR_QUEUE_NAME,
   async (job) => {
+    // Every job refreshes its installation row; only active installs do work.
+    const state = await syncInstallation(db, job.data.installationId, fetchInstallation);
+    if (job.data.kind === "installation") {
+      console.log(`[oxyqa-worker] installation ${job.data.installationId} ${job.data.action} → ${state}`);
+      return { installation: state };
+    }
+    if (state !== "active") return { skipped: `installation ${state}` };
     if (job.data.kind === "command") {
       const command = job.data;
       const octokit = await githubApp.getInstallationOctokit(command.installationId);
@@ -47,7 +53,7 @@ const worker = new Worker<OxyqaJob>(
           const { data } = await octokit.rest.repos.getCollaboratorPermissionLevel({ ...scope, username: command.actor });
           return data.permission === "admin" || data.permission === "write" || data.user?.permissions?.push === true;
         },
-        remember: async (c, text) => { await ensureInstallation(c.installationId); await memories.remember(c, text); },
+        remember: (c, text) => memories.remember(c, text),
         forget: (c, match) => memories.forget(c, match),
         currentHead: async () => {
           const { data } = await octokit.rest.pulls.get({ ...scope, pull_number: command.prNumber });
@@ -60,7 +66,6 @@ const worker = new Worker<OxyqaJob>(
         },
       });
     }
-    await ensureInstallation(job.data.installationId);
     return processPlan(job.data, {
       db, octokit: await githubApp.getInstallationOctokit(job.data.installationId), slug,
       model: config.llm.model, generate: (input) => generateTestPlan(config.llm, input),
