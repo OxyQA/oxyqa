@@ -20,10 +20,13 @@ export const installations = pgTable("installations", {
   // GitHub's installation id — the natural tenant key.
   id: bigint("id", { mode: "number" }).primaryKey(),
   accountLogin: text("account_login").notNull(),
-  accountType: text("account_type").notNull(), // "Organization" | "User"
+  accountType: text("account_type").notNull(), // "Organization" | "User" | "Enterprise" | "Unknown"
   // Per-install settings (output targets, plan gating, etc). Config-driven.
   config: jsonb("config").$type<Record<string, unknown>>().default({}).notNull(),
   suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+  // Soft delete on uninstall: plans/memories/usage stay for history and billing.
+  // GitHub never reuses installation ids, so a deleted row never comes back to life.
+  deletedAt: timestamp("deleted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
 });

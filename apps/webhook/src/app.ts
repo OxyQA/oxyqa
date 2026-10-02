@@ -1,5 +1,5 @@
 import { verify } from "@octokit/webhooks-methods";
-import { commandJobId, parseAgentCommand, planJobId, type OxyqaJob } from "@oxyqa/core";
+import { commandJobId, installationJobId, parseAgentCommand, planJobId, type OxyqaJob } from "@oxyqa/core";
 import { Hono } from "hono";
 import { z } from "zod";
 
@@ -15,6 +15,9 @@ const commentEvent = base.extend({
   issue: z.object({ number: z.number().int().positive(), pull_request: z.object({}).optional() }),
   comment: z.object({ id: z.number().int().positive(), body: z.string(), user: z.object({ login: z.string(), type: z.string() }) }),
 });
+// No repository on installation events; deleted installs still carry their id.
+const installationEvent = z.object({ action: z.string(), installation: z.object({ id: z.number().int().positive() }) });
+const installationEvents = new Set(["installation", "installation_repositories"]);
 const actions = new Set(["opened", "synchronize", "reopened", "ready_for_review"]);
 
 export interface WebhookDependencies {
@@ -39,10 +42,21 @@ export function createWebhookApp(deps: WebhookDependencies) {
       return c.json({ error: "invalid signature" }, 401);
     }
     const event = c.req.header("x-github-event");
-    if (event !== "pull_request" && event !== "issue_comment") return c.json({ ok: true, ignored: event });
+    if (event !== "pull_request" && event !== "issue_comment" && !installationEvents.has(event ?? "")) {
+      return c.json({ ok: true, ignored: event });
+    }
     let payload: unknown;
     try { payload = JSON.parse(raw); }
     catch { return c.json({ error: "invalid JSON" }, 400); }
+
+    if (installationEvents.has(event!)) {
+      const parsed = installationEvent.safeParse(payload);
+      if (!parsed.success) return c.json({ error: "invalid installation event" }, 400);
+      const job = { kind: "installation" as const, installationId: parsed.data.installation.id, action: `${event}.${parsed.data.action}` };
+      // Redeliveries reuse the delivery GUID; the raw body is a stable fallback.
+      await deps.enqueue(job, installationJobId(job, c.req.header("x-github-delivery") ?? raw));
+      return c.json({ ok: true, queued: job.action });
+    }
 
     if (event === "issue_comment") {
       const parsed = commentEvent.safeParse(payload);

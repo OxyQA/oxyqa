@@ -10,29 +10,27 @@ Companions: `README.md` (vision/roadmap) · `DEPLOY.md` (env runbook) ·
 
 ---
 
-## 0. Resume state — Phase 2 implemented; live verification blocked
+## 0. Resume state — Phase 2 merged; robustness ladder (§5) in progress
 
-Historical staging verification (2026-08-22): webhook `/health` green at
-`oxyqawebhook-staging.up.railway.app`; worker migrated and consuming; GitHub App
-`oxyqa-staging` installed on `OxyQA/oxyqa`; dogfood verified (staging bot posted
-a test plan on PR #3). Merge to `main` auto-deploys staging.
+Staging (2026-10-02): webhook `/health` green at
+`oxyqawebhook-staging.up.railway.app`; worker migrated (0000–0002) and
+consuming; GitHub App `oxyqa-staging` installed on `OxyQA/oxyqa`. Merge to
+`main` auto-deploys staging.
 
-Current build: **Phase 2 context enrichment (§3)**, sliced as three PRs —
-(1) ✅ repo context (`.oxyqa/context.md` / README) + prompt-caching restructure,
-(2) ✅ `.oxyqa/config.yml` behavior knobs (defaults ← yml ← install JSONB;
-prompt v3; this repo dogfoods `commentStyle: grouped`),
-(3) implemented on `codex/phase2-reply-memory`: reply commands, scoped memories,
-    prompt v4, migrations, and offline tests. Live dogfood is pending.
+Phase 2 context enrichment (§3) is merged as three PRs: (1) repo context +
+prompt caching (#4), (2) `.oxyqa/config.yml` knobs (#5), (3) reply commands +
+repo memories, prompt v4 (#6). Live dogfood of #6 runs on the §5.1 PR.
 
-2026-09-26: PR #5 merged. User cancelled some paid plans during development;
-continue without reactivating subscriptions. After the merge, Railway reports
-webhook SUCCESS and worker CRASHED; the worker fails before starting because
-Supabase returns `ENOTFOUND: tenant/user ... not found` during `db:migrate`.
-Do not assume staging is healthy. Offline development is supported by `pnpm test`
-(embedded PostgreSQL, stubbed GitHub/model; no hosted DB, Redis, or paid LLM calls).
-Restore/replace the staging database only when live validation is wanted; then
-verify grouped output, command acknowledgments, memories and regeneration.
-Next feature work: §5 install lifecycle and final-failure UX, then §6 integrations.
+2026-09-26 → 2026-10-02 outage: both free-tier Supabase projects paused
+(pooler answered `ENOTFOUND: tenant/user ... not found`). Restored from the
+Supabase dashboard; after a restore the direct host comes back first and the
+pooler follows ~1–2 min later — wait, don't rotate connection strings. Free
+projects pause again after ~1 week idle. User cancelled some paid plans;
+continue without reactivating subscriptions. `pnpm test` stays fully offline
+(PGlite, stubbed GitHub/model).
+
+Now building: §5.1 install lifecycle (`feat/install-lifecycle`), then §5.2
+failure UX, then §6 integrations.
 
 Guided-setup style that worked: agent gives exact dashboard steps + verifies
 each credential via API before moving on; **secrets never pasted into chat**
@@ -111,9 +109,17 @@ Prose context stays in `context.md`. Per-install overrides live in the existing
 
 ## 5. Robustness ladder (ordered; finish before public beta)
 
-1. **Install lifecycle:** subscribe both Apps to `installation` +
-   `installation_repositories`; handler upserts/suspends `installations` rows
-   and fixes the hardcoded `accountType: "Organization"` in the worker.
+1. **Install lifecycle:** handle `installation` + `installation_repositories`
+   (GitHub sends these to every App; no event subscription to tick — confirm
+   in the App's recent deliveries after deploy). Webhook enqueues one job per
+   delivery; the worker **re-reads state from `GET /app/installations/:id`**
+   instead of trusting the payload action, so ordering/retries converge.
+   Every job syncs its installation first; suspended/deleted installs skip work.
+   Account type comes from GitHub (`User`/`Organization`, `Enterprise` for
+   enterprise accounts, `Unknown` if absent) — never defaulted.
+   **Uninstall = soft delete** (`installations.deleted_at`); plans, memories
+   and usage are kept (installation ids are never reused). A retention purge
+   for deleted installs is deferred to the privacy/terms work before public beta.
 2. **Failure UX:** after final retry, set plan `status=failed` and post/update
    the PR comment with a one-line reason + "`@<slug> regenerate` to retry".
    Decision: **comment-first UX; Check Runs stay unused** until exec-test era

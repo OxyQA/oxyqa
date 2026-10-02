@@ -10,10 +10,11 @@ const payload = {
   issue: { number: 7, pull_request: {} },
   comment: { id: 99, body: "@oxyqa-staging remember: support Safari", user: { login: "alice", type: "User" } },
 };
-function request(event: string, value: unknown, valid = true) {
+function request(event: string, value: unknown, valid = true, delivery?: string) {
   const body = typeof value === "string" ? value : JSON.stringify(value);
   return new Request("http://localhost/webhooks/github", { method: "POST", body, headers: {
     "x-github-event": event,
+    ...(delivery ? { "x-github-delivery": delivery } : {}),
     "x-hub-signature-256": `sha256=${createHmac("sha256", valid ? secret : "wrong").update(body).digest("hex")}`,
   } });
 }
@@ -64,4 +65,19 @@ test("enqueue failure is retryable instead of consuming the event", async () => 
   app.onError((_, c) => c.json({ error: "queue unavailable" }, 500));
   assert.equal((await app.request(request("issue_comment", payload))).status, 500);
   assert.equal((await app.request(request("issue_comment", payload))).status, 200);
+});
+
+test("install lifecycle events queue one job per delivery, without a repository", async () => {
+  const { app, jobs } = fixture();
+  const install = { action: "suspend", installation: { id: 42 } };
+  assert.equal((await app.request(request("installation", install, true, "d-1"))).status, 200);
+  await app.request(request("installation", install, true, "d-1"));
+  await app.request(request("installation", { ...install, action: "unsuspend" }, true, "d-2"));
+  await app.request(request("installation_repositories", { ...install, action: "added" }, true, "d-3"));
+  assert.deepEqual([...jobs.values()].map((j) => j.kind === "installation" && j.action), [
+    "installation.suspend", "installation.unsuspend", "installation_repositories.added",
+  ]);
+  assert.equal((await app.request(request("installation", { action: "deleted" }, true, "d-4"))).status, 400);
+  assert.equal((await app.request(request("installation", install, false, "d-5"))).status, 401);
+  assert.equal(jobs.size, 3);
 });
