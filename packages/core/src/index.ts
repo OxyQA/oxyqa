@@ -6,7 +6,7 @@
 //   - github/diff format changed files into a budgeted, prompt-ready diff
 //   - prompt      versioned prompt builder (cached stable prefix + volatile tail)
 //   - llm         provider-agnostic generateObject + Zod test-plan schema
-//   - output      PR-comment renderer (update-in-place marker)
+//   - output      PR-comment renderer (update-in-place marker) + final-failure banner
 //   - context     Phase 2: .oxyqa/context.md / README and repo memories, budgeted
 //   - commands    explicit reply-to-agent command parsing
 //   - repo-config Phase 2: .oxyqa/config.yml behavior knobs (defaults ← yml ← install)
@@ -26,3 +26,4 @@ export * from "./llm/model.js";
 export * from "./llm/schema.js";
 export * from "./llm/generate.js";
 export * from "./output/comment.js";
+export * from "./output/failure.js";

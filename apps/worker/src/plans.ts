@@ -1,13 +1,26 @@
 import {
-  COMMENT_MARKER, REPO_CONFIG_PATH, formatRepoMemories, formatDiff,
-  loadRepoContext, renderPlanComment, resolveRepoConfig,
+  COMMENT_MARKER, REPO_CONFIG_PATH, describeFailure, formatRepoMemories, formatDiff,
+  loadRepoContext, renderFailureComment, renderPlanComment, resolveRepoConfig,
   type PrJob, type RepoContentReader, type PromptInput, type GenerateResult,
 } from "@oxyqa/core";
 import { installations, plans, testCases, usage, type Database } from "@oxyqa/db";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Octokit } from "octokit";
 import { createMemoryStore } from "./memories.js";
-import { writeBotComment } from "./github-comments.js";
+import { findBotComment, writeBotComment } from "./github-comments.js";
+
+type Tx = Parameters<Parameters<Database["transaction"]>[0]>[0];
+
+// Serializes publication per PR (across head SHAs): plan posts, regenerations
+// and failure banners must not interleave on the one bot comment.
+function lockPullRequest(tx: Tx, { installationId, owner, repo, prNumber }: PrJob) {
+  return tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`${installationId}/${owner.toLowerCase()}/${repo.toLowerCase()}#${prNumber}`}, 0))`);
+}
+
+function planScope({ installationId, owner, repo, prNumber, headSha }: PrJob) {
+  return and(eq(plans.installationId, installationId), eq(plans.owner, owner), eq(plans.repo, repo),
+    eq(plans.prNumber, prNumber), eq(plans.headSha, headSha));
+}
 
 // Adapts an installation Octokit onto core's minimal read surface so the
 // context loader stays GitHub-client-agnostic.
@@ -122,10 +135,9 @@ export async function processPlan(job: PrJob, { db, octokit, slug, model, genera
 
   // 5. Post or update the PR comment (idempotent via the hidden marker).
   const body = renderPlanComment(plan, { headSha, promptVersion }, repoConfig.commentStyle);
-  // Serialize publication per PR (including different head SHAs). Concurrent
-  // regenerate jobs must not create duplicate comments or interleave case replacement.
+  // Concurrent regenerate jobs must not create duplicate comments or interleave case replacement.
   return db.transaction(async (tx) => {
-    await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${`${installationId}/${owner.toLowerCase()}/${repo.toLowerCase()}#${prNumber}`}, 0))`);
+    await lockPullRequest(tx, job);
     const { data: latest } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
     if (latest.head.sha !== headSha || latest.state !== "open" || latest.draft) {
       await tx.update(plans).set({ status: "superseded", updatedAt: new Date() }).where(eq(plans.id, planId));
@@ -152,5 +164,36 @@ export async function processPlan(job: PrJob, { db, octokit, slug, model, genera
     );
 
     return { testCases: plan.testCases.length, commentId };
+  });
+}
+
+export interface FailureDependencies {
+  db: Database;
+  octokit: Octokit;
+  slug: string;
+  /** When the failing attempt started; a plan posted after it wins. */
+  attemptStartedAt: Date;
+}
+
+/**
+ * Final-attempt failure UX (DECISIONS §5.2): mark the plan failed and put a
+ * one-line reason + retry hint on the bot comment, without discarding a
+ * previous plan. Stale PRs and runs overtaken by a later success stay quiet.
+ */
+export async function reportPlanFailure(job: PrJob, err: unknown, { db, octokit, slug, attemptStartedAt }: FailureDependencies) {
+  const { owner, repo, prNumber, headSha } = job;
+  const reason = describeFailure(err);
+  return db.transaction(async (tx) => {
+    await lockPullRequest(tx, job);
+    const { data: pr } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
+    if (pr.head.sha !== headSha || pr.state !== "open" || pr.draft) return { skipped: "stale or closed PR" };
+    const [row] = await tx.select({ status: plans.status, updatedAt: plans.updatedAt }).from(plans).where(planScope(job));
+    if (row?.status === "posted" && row.updatedAt >= attemptStartedAt) return { skipped: "a later run succeeded" };
+    const scope = { owner, repo, prNumber };
+    const existing = await findBotComment(octokit, scope, slug, COMMENT_MARKER);
+    const body = renderFailureComment(existing?.body ?? null, { reason, headSha, slug });
+    const commentId = await writeBotComment(octokit, scope, slug, COMMENT_MARKER, body, existing?.id);
+    await tx.update(plans).set({ status: "failed", updatedAt: new Date() }).where(planScope(job));
+    return { failed: reason, commentId };
   });
 }
