@@ -11,6 +11,7 @@ function fixture(overrides: Partial<CommandDependencies> = {}) {
     slug: "oxyqa-staging", canWrite: async () => true, isPullRequest: async () => true,
     remember: async (_, text) => { effects.push(`remember:${text}`); }, forget: async () => { effects.push("forget"); return 1; },
     createIssue: async () => ({ status: "created", number: 12, url: "https://github.com/org/repo/issues/12" }),
+    answer: async () => "Case 3 is critical because a lockout bypass exposes accounts.",
     interpret: async () => ({ type: "help" }), forgetIds: async (_, ids) => { effects.push(`forgetIds:${ids.join(",")}`); return ids.length; },
     currentHead: async () => "current-sha", enqueue: async (job, id) => { if (!jobs.has(id)) jobs.set(id, job); },
     acknowledge: async (_, text) => { effects.push(text); }, ...overrides,
@@ -151,4 +152,23 @@ test("a command that fails on its final attempt tells the commenter; earlier att
 
   const ok = fixture();
   assert.deepEqual(await runCommand({ ...base, command: { type: "regenerate" } }, true, ok.deps), { command: "regenerate" });
+});
+
+test("questions about the plan are answered after routing; no plan and no permission never reach the model", async () => {
+  const ask = { ...base, command: { type: "freeform", text: "why is case 3 critical?" } } as const;
+  let asked: string[] = [];
+  const f = fixture({ interpret: async () => ({ type: "question" }), answer: async (_, q) => { asked.push(q); return "Because of X."; } });
+  assert.deepEqual(await processCommand(ask, f.deps), { command: "freeform", interpreted: "question" });
+  assert.deepEqual(asked, ["why is case 3 critical?"], "the original comment is the question");
+  assert.deepEqual(f.effects, ["Because of X."]);
+  assert.equal(f.jobs.size, 0);
+
+  const noPlan = fixture({ interpret: async () => ({ type: "question" }), answer: async () => null });
+  await processCommand(ask, noPlan.deps);
+  assert.match(noPlan.effects[0]!, /no test plan on this pull request yet/);
+
+  asked = [];
+  const denied = fixture({ canWrite: async () => false, interpret: async () => ({ type: "question" }), answer: async (_, q) => { asked.push(q); return "x"; } });
+  await processCommand(ask, denied.deps);
+  assert.deepEqual(asked, []);
 });

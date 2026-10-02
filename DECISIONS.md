@@ -130,6 +130,11 @@ Prose context stays in `context.md`. Per-install overrides live in the existing
   retry. Router calls are not metered against the monthly cap (≈ $0.001
   each) — revisit if abused. `pnpm --filter @oxyqa/worker route:sample` is the
   live regression set (12/12 on 2026-10-02); it never runs in CI.
+- **Plan Q&A (built):** the router's `question` intent answers questions about
+  the PR's posted plan ("why is case 3 critical?", "does this cover X?") with
+  one call on the plan model. Grounded in the stored plan only — the diff is
+  not re-read, so an answer cannot reveal more than the plan comment shows;
+  when coverage is missing it says so. Unmetered, like routing.
 - **Ack:** reply comment via existing PR-comment write. (👍-reaction ack needs
   Issues:write — deferred deliberately; Issues stays read-only until Phase 3a.)
 
@@ -260,10 +265,8 @@ build or start files, confirm the worker log reaches `listening on queue`.
   and owns the content. Costs an extra LLM call, so it must respect free-tier
   gating. Trigger: Phase 5 onboarding build, or earlier if README-fallback
   plan quality proves weak in beta.
-- **Plan Q&A and inferred memories** — follow-ons to natural-language replies
-  (§4): answer questions about the current plan ("why is case 3 critical?"),
-  and learn guidance from ordinary review discussion (`source: inferred`,
-  column exists). Trigger: beta feedback asks for it.
+- **Inferred memories** — learn guidance from ordinary review discussion
+  (`source: inferred`, column exists). Trigger: beta feedback asks for it.
 - **Jira/Xray** — trigger: first enterprise team asks.
 - **Executable test generation** — trigger: checklist edit-rate measured & good.
 - **Prod environment (Railway env #2, `oxyqa-prod` Supabase paid, fixed-Pro
