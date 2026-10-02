@@ -68,7 +68,14 @@ each credential via API before moving on; **secrets never pasted into chat**
 ## 3. Phase 2 spec — context enrichment (next major build)
 
 Priority-ordered context sources, under a **~12k-token total context budget**
-(diff keeps its existing 24k-char budget):
+(the diff has its own budget — **amended 2026-10-02: 24k → 60k chars
+(~15k tokens)** because dogfood PRs showed 27 of 42 files dropped, in
+alphabetical order, with any file that didn't fit dropped whole. Diff
+windowing now ranks source > tests > docs/config > generated noise, truncates
+an oversized file (max 40% of the budget) instead of dropping it, lists
+unshown files by name, and the plan footer says when a large PR was only
+partly analyzed. Cost: at most ~$0.03 more input per plan on Sonnet 4.6;
+revert `DEFAULT_DIFF_BUDGET` if that matters):
 
 1. `.oxyqa/context.md` from the target repo (team-authored domain terms, testing
    conventions). Cap ~6k tokens, truncate tail with a visible notice.

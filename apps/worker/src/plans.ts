@@ -150,7 +150,7 @@ export async function processPlan(job: PrJob, { db, octokit, slug, model, genera
   });
   const diff = formatDiff(files, { skipPaths: repoConfig.skipPaths });
   log(
-    `${files.length} files changed, ${diff.included} in diff (${diff.skipped} skipped by config, ${diff.omitted} over budget)`,
+    `${files.length} files changed, ${diff.included} in diff (${diff.truncated} truncated, ${diff.skipped} skipped by config, ${diff.omitted} over budget)`,
   );
 
   // 4. Load repo context (.oxyqa/context.md → README fallback) at the PR head.
@@ -187,7 +187,7 @@ export async function processPlan(job: PrJob, { db, octokit, slug, model, genera
   });
 
   // 7. Post or update the PR comment (idempotent via the hidden marker).
-  const body = renderPlanComment(plan, { headSha, promptVersion }, repoConfig.commentStyle);
+  const body = renderPlanComment(plan, { headSha, promptVersion, coverage: diff }, repoConfig.commentStyle);
   // Concurrent regenerate jobs must not create duplicate comments or interleave case replacement.
   return db.transaction(async (tx) => {
     await lockPullRequest(tx, job);
