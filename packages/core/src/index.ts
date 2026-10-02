@@ -1,5 +1,9 @@
 // @oxyqa/core — shared domain logic.
 //
+// Deploy note: Railway rebuilds a service only when a path in its
+// `watchPatterns` changes (apps/<service>/**, packages/**, pnpm-lock.yaml).
+// Changes to root build files alone are skipped.
+//
 // Implemented (Phase 0/1):
 //   - config      env-driven configuration (the cloud/self-hosted boundary)
 //   - queue       shared PR job contract + BullMQ/Redis wiring
