@@ -203,3 +203,34 @@ test("monthly cap blocks generation before any model call and resets with the ca
   assert.equal(calls, 4, "the cap resets with the UTC month");
   assert.doesNotMatch(comments[0]!.body, /\[!NOTE\]/);
 });
+
+test("linked issues from the PR body and branch reach the prompt; unreadable ones and PRs are skipped", async (t) => {
+  const client = new PGlite(); t.after(() => client.close());
+  const dir = new URL("../../../packages/db/migrations/", import.meta.url);
+  for (const file of (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort()) await client.exec(await readFile(new URL(file, dir), "utf8"));
+  const db = drizzle(client);
+  await db.insert(installations).values({ id: 1, accountLogin: "org", accountType: "Organization" });
+  const fetched: number[] = [];
+  const notFound = async () => { throw Object.assign(new Error("nf"), { status: 404 }); };
+  const octokit = {
+    paginate: Object.assign(async () => [{ filename: "a.ts", status: "modified", additions: 1, deletions: 0, patch: "+a" }], { async *iterator() { yield { data: [] }; } }),
+    rest: {
+      pulls: { get: async () => ({ data: { title: "Lockout", body: "Fixes #12. See also #13 and #14.", state: "open", draft: false, head: { sha: job.headSha, ref: "15-lockout" } } }), listFiles() {} },
+      repos: { getContent: notFound, getReadme: notFound },
+      issues: {
+        listComments() {},
+        get: async ({ issue_number }: { issue_number: number }) => {
+          fetched.push(issue_number);
+          if (issue_number === 13) throw Object.assign(new Error("gone"), { status: 410 });
+          return { data: { number: issue_number, title: `Issue ${issue_number}`, body: "Lock after 5 attempts", state: "open", labels: [{ name: "security" }, "auth"], ...(issue_number === 14 ? { pull_request: {} } : {}) } };
+        },
+        createComment: async () => ({ data: { id: 1 } }),
+        updateComment: async () => {},
+      },
+    },
+  } as unknown as Octokit;
+  const inputs: PromptInput[] = [];
+  await processPlan(job, { db: db as unknown as Database, octokit, slug: "oxyqa-staging", model: "offline-stub", generate: async (input) => { inputs.push(input); return result; } });
+  assert.deepEqual(fetched, [12, 13, 14], "capped at three references, closing keyword first");
+  assert.equal(inputs[0]!.linkedIssues, "### #12: Issue 12 (open) [security, auth]\nLock after 5 attempts");
+});

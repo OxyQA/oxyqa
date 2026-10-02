@@ -113,6 +113,14 @@ commands return help. Memories are scoped to installation + owner + repository;
 the latest 20 active memories enter the prompt within a ~2k-token budget. Use
 regenerate after remembering or forgetting to apply the change to an existing plan.
 
+## What goes into a plan
+
+Besides the diff, each plan draws on: `.oxyqa/context.md` (or the README when
+that file is absent), saved repository memories, and up to three **linked
+issues** — referenced in the PR title or body (`Fixes #12`, `#12`, an issue URL)
+or implied by the branch name (`12-add-lockout`). Tune behavior with
+`.oxyqa/config.yml` (`maxCases`, `focusAreas`, `skipPaths`, `commentStyle`).
+
 ## Build order (from the roadmap)
 
 - ✅ **Phase 0** — Foundations: monorepo skeleton (this), register dev GitHub App, local webhook tunnel (smee/cloudflared), `@octokit/auth-app`, local Postgres in Docker, Drizzle schema.

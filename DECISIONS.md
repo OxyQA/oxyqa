@@ -73,8 +73,13 @@ Priority-ordered context sources, under a **~12k-token total context budget**
 1. `.oxyqa/context.md` from the target repo (team-authored domain terms, testing
    conventions). Cap ~6k tokens, truncate tail with a visible notice.
 2. Repo memories from reply-to-agent (§4) — latest 20 active, ~2k tokens.
-3. Linked tickets: parse GitHub `#123` refs (Phase 3a) and Linear keys
-   (`ABC-123`, Phase 3b) from PR title/body/branch name; fetch + summarize.
+3. Linked tickets: **GitHub issues built** — refs parsed from PR title/body
+   (closing keywords first, then mentions, same-repo `#12` / `owner/repo#12` /
+   issue URLs; code spans ignored) and the branch name (`12-slug`, `issue-12`);
+   max 3 issues, ~600 tokens each, truncated not summarized (no extra LLM
+   call). PRs and unreadable issues are skipped; never fails a plan. They are
+   per-PR, so they sit in the volatile prompt tail (prompt v5), not the cached
+   prefix. Linear keys (`ABC-123`) follow in Phase 3b.
 4. Repo README excerpt (first ~1.5k tokens) as fallback orientation.
 
 **Prompt caching:** restructure so `[system + repo context]` is a stable prefix

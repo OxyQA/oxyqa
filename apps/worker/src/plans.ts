@@ -1,8 +1,8 @@
 import {
-  COMMENT_MARKER, REPO_CONFIG_PATH, describeFailure, formatRepoMemories, formatDiff,
+  COMMENT_MARKER, REPO_CONFIG_PATH, describeFailure, extractIssueRefs, formatLinkedIssues, formatRepoMemories, formatDiff,
   loadRepoContext, monthWindow, renderFailureComment, renderLimitComment, renderPlanComment,
   resolveMonthlyPlanLimit, resolveRepoConfig,
-  type PrJob, type RepoContentReader, type PromptInput, type GenerateResult,
+  type LinkedIssue, type PrJob, type RepoContentReader, type PromptInput, type GenerateResult,
 } from "@oxyqa/core";
 import { installations, plans, testCases, usage, type Database } from "@oxyqa/db";
 import { and, count, eq, gte, sql } from "drizzle-orm";
@@ -48,6 +48,27 @@ function makeContentReader(octokit: Octokit, owner: string, repo: string): RepoC
       }
     },
   };
+}
+
+// Issues referenced by the PR. Missing, deleted or inaccessible issues are
+// skipped — linked context is best-effort and never fails a plan. Pull
+// requests share the issue number space and are not requirements; skip them.
+async function loadLinkedIssues(octokit: Octokit, owner: string, repo: string, numbers: number[]): Promise<LinkedIssue[]> {
+  const issues: LinkedIssue[] = [];
+  for (const issue_number of numbers) {
+    try {
+      const { data } = await octokit.rest.issues.get({ owner, repo, issue_number });
+      if (data.pull_request) continue;
+      issues.push({
+        number: data.number, title: data.title, body: data.body ?? null, state: data.state,
+        labels: data.labels.map((l) => (typeof l === "string" ? l : l.name ?? "")).filter(Boolean),
+      });
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status !== 404 && status !== 410 && status !== 403) throw err;
+    }
+  }
+  return issues;
 }
 
 export interface PlanDependencies {
@@ -136,13 +157,19 @@ export async function processPlan(job: PrJob, { db, octokit, slug, model, genera
   const repoContext = await loadRepoContext(reader, headSha);
   log(`context: ${repoContext.source}${repoContext.truncated ? " (truncated)" : ""}`);
 
-  // 5. Generate the test plan (provider-agnostic LLM call).
+  // 5. Linked issues (requirements context), parsed from title/body/branch.
+  const refs = extractIssueRefs({ title: pr.title, body: pr.body, branch: pr.head.ref }, { owner, repo }, prNumber);
+  const linked = refs.length ? await loadLinkedIssues(octokit, owner, repo, refs) : [];
+  if (refs.length) log(`linked issues: ${linked.map((i) => `#${i.number}`).join(", ") || "none readable"} (referenced: ${refs.map((n) => `#${n}`).join(", ")})`);
+
+  // 6. Generate the test plan (provider-agnostic LLM call).
   const { plan, promptVersion, usage: tokens } = await generate({
     prTitle: pr.title,
     prBody: pr.body ?? undefined,
     diff: diff.text,
     repoContext: repoContext.text,
     repoMemories: formatRepoMemories(await memories.load({ installationId, owner, repo })),
+    linkedIssues: formatLinkedIssues(linked),
     oneShotFocus,
     behavior: { maxCases: repoConfig.maxCases, focusAreas: repoConfig.focusAreas },
   }, { installationId, repo: `${owner}/${repo}`, prNumber, headSha });
@@ -159,7 +186,7 @@ export async function processPlan(job: PrJob, { db, octokit, slug, model, genera
     outputTokens: tokens.outputTokens,
   });
 
-  // 6. Post or update the PR comment (idempotent via the hidden marker).
+  // 7. Post or update the PR comment (idempotent via the hidden marker).
   const body = renderPlanComment(plan, { headSha, promptVersion }, repoConfig.commentStyle);
   // Concurrent regenerate jobs must not create duplicate comments or interleave case replacement.
   return db.transaction(async (tx) => {
@@ -172,7 +199,7 @@ export async function processPlan(job: PrJob, { db, octokit, slug, model, genera
     const commentId = await writeBotComment(octokit, { owner, repo, prNumber }, slug, COMMENT_MARKER, body);
     log(`posted plan comment ${commentId}`);
 
-    // 7. Atomically persist plan status and replace its cases on regeneration.
+    // 8. Atomically persist plan status and replace its cases on regeneration.
     await tx
       .update(plans)
       .set({ status: "posted", commentId, promptVersion, updatedAt: new Date() })

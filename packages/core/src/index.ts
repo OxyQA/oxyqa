@@ -7,14 +7,14 @@
 //   - prompt      versioned prompt builder (cached stable prefix + volatile tail)
 //   - llm         provider-agnostic generateObject + Zod test-plan schema
 //   - output      PR-comment renderer (update-in-place marker) + final-failure banner
-//   - context     Phase 2: .oxyqa/context.md / README and repo memories, budgeted
+//   - context     Phase 2: .oxyqa/context.md / README, repo memories and linked issues, budgeted
 //   - commands    explicit reply-to-agent command parsing
 //   - limits      free-tier gating: per-install monthly plan cap
 //   - observability optional Sentry error reporting + Langfuse LLM tracing
 //   - repo-config Phase 2: .oxyqa/config.yml behavior knobs (defaults ← yml ← install)
 //
 // Planned (Phase 2+):
-//   - context/      linked tickets
+//   - context/      Linear tickets
 //   - integrations/ Linear push (Jira/Xray deferred)
 export * from "./config.js";
 export * from "./repo-config.js";
@@ -23,6 +23,7 @@ export * from "./queue.js";
 export * from "./commands.js";
 export * from "./context/memories.js";
 export * from "./context/repo.js";
+export * from "./context/issues.js";
 export * from "./github/diff.js";
 export * from "./prompt/build.js";
 export * from "./llm/model.js";
