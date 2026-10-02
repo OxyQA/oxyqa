@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { parseAgentCommand } from "../src/commands.js";
+import { buildAnswerPrompt } from "../src/llm/answer.js";
 import { buildRoutePrompt, interpretRoutedCommand, type RoutedCommand } from "../src/llm/route.js";
 import { formatRepoMemories, MEMORY_TOKEN_BUDGET } from "../src/context/memories.js";
 import { buildTestPlanPrompt } from "../src/prompt/build.js";
@@ -46,6 +47,7 @@ test("routed commands are validated: limits hold, forget is bounded to listed me
   assert.deepEqual(routed("regenerate", "ignored"), { type: "regenerate" });
   assert.deepEqual(routed("none"), { type: "help" });
   assert.deepEqual(routed("create_issue", "ignored"), { type: "create-issue" });
+  assert.deepEqual(routed("question", "ignored"), { type: "question" });
   assert.deepEqual(routed("forget", "", [2, 2, 0, -1, 3, 99]), { type: "forget", memories: [saved[1]] });
   assert.deepEqual(routed("forget"), { type: "forget", memories: [] });
 });
@@ -86,4 +88,18 @@ test("queue identifiers isolate installations, repositories, PRs and comments", 
   assert.notEqual(commandJobId({ installationId: 1, commentId: 1 }), commandJobId({ installationId: 1, commentId: 2 }));
   assert.notEqual(planJobId({ ...job, owner: "a-b", repo: "c" }), planJobId({ ...job, owner: "a", repo: "b-c" }));
   assert.ok(!id.includes(":"));
+});
+
+test("answer prompt numbers cases like the PR comment, fences the question and never includes a diff", () => {
+  const cases = [
+    { title: "Low one", description: "d", steps: ["a"], expected: "e", priority: "low" },
+    { title: "Critical one", description: null, steps: ["b", "c"], expected: null, priority: "critical" },
+  ];
+  const grouped = buildAnswerPrompt({ question: "why is case 1 critical?", prTitle: "Lockout", summary: "Adds lockout", cases, style: "grouped", slug: "oxyqa" });
+  assert.match(grouped.prompt, /Case 1: Critical one \(🔴 critical\)\n  1\. b\n  2\. c\n\nCase 2: Low one/);
+  assert.match(grouped.prompt, /<question>\nwhy is case 1 critical\?\n<\/question>/);
+  assert.match(grouped.prompt, /@oxyqa focus: <area>/);
+  assert.match(grouped.system, /you have the plan, not the diff/);
+  const flat = buildAnswerPrompt({ question: "q", prTitle: "T", summary: null, cases, style: "flat", slug: "oxyqa" });
+  assert.match(flat.prompt, /Case 1: Low one[\s\S]*Case 2: Critical one/);
 });

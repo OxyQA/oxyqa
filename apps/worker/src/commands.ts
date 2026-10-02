@@ -11,6 +11,8 @@ export interface CommandDependencies {
   interpret(job: CommandJob, text: string): Promise<Interpretation>;
   forgetIds(job: CommandJob, ids: string[]): Promise<number>;
   createIssue(job: CommandJob): Promise<TrackingIssueResult>;
+  /** Answers a question about the PR's posted plan (model call); null when there is no plan. */
+  answer(job: CommandJob, question: string): Promise<string | null>;
   currentHead(job: CommandJob): Promise<string | null>;
   enqueue(job: PrJob, id: string): Promise<unknown>;
   acknowledge(job: CommandJob, text: string): Promise<void>;
@@ -85,6 +87,12 @@ export async function processCommand(job: CommandJob, deps: CommandDependencies)
       else if (result.status === "no-plan") reply = `There's no test plan on this pull request yet. Comment \`@${deps.slug} regenerate\` first.`;
       else if (result.status === "issues-disabled") reply = "Issues are disabled for this repository, so I can't open a tracking issue.";
       else reply = "I need the **Issues: write** permission to open a tracking issue. An organization owner can approve the updated permissions in the app's installation settings.";
+      break;
+    }
+    case "question": {
+      // Only reachable through routing, so the original comment is the question.
+      const answer = command.type === "freeform" ? await deps.answer(job, command.text) : null;
+      reply = answer ?? `There's no test plan on this pull request yet. Comment \`@${deps.slug} regenerate\` first.`;
       break;
     }
     default:

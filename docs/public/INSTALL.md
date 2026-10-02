@@ -54,6 +54,7 @@ Start a PR comment with the bot's mention and say what you want:
 - "stop doing the Safari thing" — removes that guidance
 - "try again, focus on error handling" — regenerates this plan with that emphasis
 - "turn this into an issue" — one tracking issue with the plan as a checklist
+- "why is case 3 critical?" — an answer grounded in the plan
 
 It replies with what it understood. Only people with write access can do this.
 Exact commands also work: `remember: …`, `forget …`, `regenerate`,
