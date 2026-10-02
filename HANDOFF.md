@@ -178,9 +178,7 @@ versioned migrations · dead-letter queue + failure alerting · prompt caching (
 the context prefix) + per-tier model selection + usage caps enforced in worker ·
 Langfuse (LLM traces) + Sentry (errors) + structured logs · encrypt stored tokens
 at rest, never log diffs, minimize token scope, secret manager for the private key ·
-GitHub Marketplace + Stripe billing + entitlement gating in worker · free-tier
-gating + graceful GitHub rate-limit handling · privacy policy + ToS + Autodesk PIIA
-disclosure.
+graceful GitHub rate-limit handling · privacy policy + ToS.
 
 ## Account/setup status
 
