@@ -1,7 +1,8 @@
-// The LLM orchestrator: prompt in, validated TestPlan out. This is the single
+// The LLM orchestrator: prompt in, validated TestPlan out (provider-native
+// structured output; no sampling parameters are sent, so current models accept it). This is the single
 // place that calls the model, so cost/latency instrumentation (Langfuse) and
 // retries have one home.
-import { generateObject } from "ai";
+import { Output, generateText } from "ai";
 import { PROMPT_VERSION, buildTestPlanPrompt, type PromptInput } from "../prompt/build.js";
 import { type LlmObserver, observeLlmCall } from "../observability.js";
 import { type LlmConfig, resolveModel } from "./model.js";
@@ -58,19 +59,17 @@ export async function generateTestPlan(llm: LlmConfig, input: PromptInput, optio
     options.observer,
     { name: "test-plan", model: llm.model, system, prompt, metadata: { ...options.metadata, promptVersion: PROMPT_VERSION } },
     async () => {
-      const { object, usage, providerMetadata } = await generateObject({
+      const { output: object, usage, providerMetadata } = await generateText({
         model,
-        schema: testPlanSchema,
-        messages: [
-          {
-            role: "system",
-            content: system,
-            // Cache breakpoint: everything up to here ([tools +] system + repo
-            // context) is stable per-repo; the per-PR prompt below varies freely.
-            providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
-          },
-          { role: "user", content: prompt },
-        ],
+        output: Output.object({ schema: testPlanSchema }),
+        // Cache breakpoint: everything up to here ([tools +] system + repo
+        // context) is stable per-repo; the per-PR prompt below varies freely.
+        instructions: {
+          role: "system",
+          content: system,
+          providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
+        },
+        prompt,
       });
       const cache = providerMetadata?.anthropic as
         | { cacheReadInputTokens?: number | null; cacheCreationInputTokens?: number | null }
@@ -78,10 +77,10 @@ export async function generateTestPlan(llm: LlmConfig, input: PromptInput, optio
       return {
         output: object,
         usage: {
-          inputTokens: usage.promptTokens ?? 0,
-          outputTokens: usage.completionTokens ?? 0,
-          cacheReadInputTokens: cache?.cacheReadInputTokens ?? 0,
-          cacheCreationInputTokens: cache?.cacheCreationInputTokens ?? 0,
+          inputTokens: usage.inputTokens ?? 0,
+          outputTokens: usage.outputTokens ?? 0,
+          cacheReadInputTokens: usage.inputTokenDetails?.cacheReadTokens ?? cache?.cacheReadInputTokens ?? 0,
+          cacheCreationInputTokens: usage.inputTokenDetails?.cacheWriteTokens ?? cache?.cacheCreationInputTokens ?? 0,
         },
       };
     },

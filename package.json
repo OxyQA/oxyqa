@@ -2,10 +2,10 @@
   "name": "oxyqa",
   "version": "0.0.0",
   "private": true,
-  "description": "OxyQA \u2014 AI QA test plans from your PR diffs. Multi-tenant cloud SaaS and single-tenant self-hosted from one codebase.",
+  "description": "OxyQA — AI QA test plans from your PR diffs. Multi-tenant cloud SaaS and single-tenant self-hosted from one codebase.",
   "packageManager": "pnpm@9.12.0",
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12"
   },
   "scripts": {
     "build": "turbo run build",
@@ -24,7 +24,8 @@
   },
   "pnpm": {
     "overrides": {
-      "ioredis": "5.11.1"
+      "ioredis": "5.11.1",
+      "@opentelemetry/api": "1.9.1"
     }
   }
 }

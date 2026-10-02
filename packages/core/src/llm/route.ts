@@ -3,7 +3,7 @@
 // never reach this (commands.ts). The router only *chooses* — the worker
 // executes, echoes the interpretation back, and enforces the same limits as
 // the keyword commands.
-import { generateObject } from "ai";
+import { Output, generateText } from "ai";
 import { z } from "zod";
 import { MAX_FOCUS_CHARS, MAX_MEMORY_CHARS } from "../commands.js";
 import { type LlmObserver, observeLlmCall } from "../observability.js";
@@ -55,10 +55,10 @@ export async function routeCommand(llm: LlmConfig, input: RouteInput, options: R
     options.observer,
     { name: "command-route", model: llm.model, system, prompt, metadata: { ...options.metadata, promptVersion: ROUTER_PROMPT_VERSION } },
     async () => {
-      const { object, usage } = await generateObject({ model: resolveModel(llm), schema: routedCommandSchema, system, prompt, maxTokens: 1024 });
+      const { output: object, usage } = await generateText({ model: resolveModel(llm), output: Output.object({ schema: routedCommandSchema }), instructions: system, prompt, maxOutputTokens: 1024 });
       return {
         output: object,
-        usage: { inputTokens: usage.promptTokens ?? 0, outputTokens: usage.completionTokens ?? 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
+        usage: { inputTokens: usage.inputTokens ?? 0, outputTokens: usage.outputTokens ?? 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 },
       };
     },
   );

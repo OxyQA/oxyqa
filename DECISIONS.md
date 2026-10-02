@@ -60,8 +60,9 @@ each credential via API before moving on; **secrets never pasted into chat**
   local dev keeps `db:push`.
 - **Secrets:** never in chat, never in git. Local = `.env` (gitignored), staging =
   Railway vars, GitHub App key on Railway = `GITHUB_APP_PRIVATE_KEY` inline PEM.
-- **Model default:** `claude-sonnet-4-6` everywhere until the temperature fix
-  (§7) lands; Opus/Fable reserved for paid tiers later.
+- **Model default:** `claude-sonnet-4-6` for plans, `claude-haiku-4-5` for
+  routing replies. Newer models work since the AI SDK upgrade (§7); switching
+  the default is the owner's call. Opus/Fable reserved for paid tiers later.
 - **LLM calls never run in CI** (cost); quality checks happen via the sample
   script and staging dogfood.
 
@@ -233,7 +234,7 @@ worker only while testing.
 | Debt | Exit |
 |---|---|
 | Prod and the self-host image run via `tsx` (workspace pkgs resolve to TS source; `node dist` crashes) | Acceptable: one code path for cloud and self-hosted. Bundle with **tsup** only if image size or cold start becomes a problem |
-| Main model is pinned to `claude-sonnet-4-6`. AI SDK v4 `generateObject` sends `temperature: 0` **and forces `tool_choice`**; current models (Sonnet 5.5, Opus 5.x, Fable 5.x) reject one or both with HTTP 400 (checked 2026-10-02). Haiku 4.5 (router) and Sonnet 4.6 accept both | Upgrade `ai` / `@ai-sdk/anthropic` (v4 → current major, which uses native structured outputs) as its own PR with a `generate:sample` + `route:sample` before/after check; do it with paid-tier model selection or when Sonnet 4.6 nears retirement. Omitting sampling params alone is **not** enough |
+| AI SDK upgraded v4 → v7 (2026-10-02): provider-native structured output, no sampling params sent. Verified live: Sonnet 4.6 (default) and Sonnet 5.5 generate plans, Haiku 4.5 routes 14/14, prompt caching reads back on both. `usage.input_tokens` now stores **total** input including cached tokens (v4 stored uncached only) | Default stays `claude-sonnet-4-6` — changing it is a cost/quality call for the owner (Sonnet 5.5 is cheaper per token and gave more detailed plans in one sample). Opus/Fable untested |
 | `ioredis` pinned 5.11.1 via pnpm override (bullmq type clash) | Revisit on bullmq major bump only |
 | Dev DB is `db:push`-managed (no migration history) | Acceptable permanently for local; staging/prod are migration-managed from first deploy |
 | `apps/dashboard` is a stub | Phase 5: Next.js on Railway; sign-in = GitHub OAuth via the App (that's when callback URL gets set) |
