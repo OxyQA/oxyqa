@@ -8,7 +8,11 @@
 # from .env are overridden so a copied cloud .env can't point at shared services.
 
 x-oxyqa: &oxyqa
-  build: .
+  # Not named `Dockerfile` on purpose: Railway builds any root Dockerfile it
+  # finds, which replaced the hosted build and broke the worker's start command.
+  build:
+    context: .
+    dockerfile: Dockerfile.selfhost
   image: oxyqa:local
   env_file: .env
   environment: &oxyqa-env

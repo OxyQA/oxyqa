@@ -1,4 +1,6 @@
-# One image for both services (self-hosted packaging, Phase 4). The service is
+# One image for both services (self-hosted packaging, Phase 4). Used only by
+# docker-compose.yml. Keep this file name: a root `Dockerfile` would be picked
+# up by Railway and replace the hosted Nixpacks build. The service is
 # chosen by the container command — see docker-compose.yml.
 #
 # Runs TypeScript through tsx, exactly like the hosted deployment, so

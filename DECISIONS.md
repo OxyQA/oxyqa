@@ -213,6 +213,15 @@ free tier (500K/month) can replace the $10 fixed plan — the worker loop was
 not the whole 219, so do not assume it fits. Dev Redis stays free; run the dev
 worker only while testing.
 
+**Incident 2026-10-02 (staging worker down ~03:50–fix):** #17 added a root
+`Dockerfile` for self-hosting. Railway builds a root Dockerfile even with
+`"builder": "NIXPACKS"` in the config-as-code file, and runs the start command
+without a shell, so `db:migrate && worker start` ran only the migration and
+exited 0 (no restart under `ON_FAILURE`). Fix: the file is
+`Dockerfile.selfhost`, referenced only from `docker-compose.yml`. Rules going
+forward: **never add a root `Dockerfile`**, and after any merge that touches
+build or start files, confirm the worker log reaches `listening on queue`.
+
 ## 6. Phase 3 sketches
 
 - **3a GitHub Issues (built; needs a permission bump to go live):**
