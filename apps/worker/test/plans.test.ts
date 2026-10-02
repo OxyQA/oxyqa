@@ -7,7 +7,7 @@ import { installations, repoMemories, plans, testCases, usage, type Database } f
 import { eq } from "drizzle-orm";
 import type { Octokit } from "octokit";
 import { PROMPT_VERSION, type PromptInput, type PrJob, type GenerateResult } from "@oxyqa/core";
-import { processPlan } from "../src/plans.js";
+import { processPlan, reportPlanFailure } from "../src/plans.js";
 
 const job: PrJob = { installationId: 1, owner: "org", repo: "repo", prNumber: 7, headSha: "a".repeat(40), action: "command" };
 const result: GenerateResult = {
@@ -75,4 +75,74 @@ test("full plan pipeline runs against local PostgreSQL and a stubbed model/GitHu
   assert.equal((await db.select().from(plans).where(eq(plans.prNumber, 7)))[0]!.status, "superseded");
   assert.equal(comments.length, 2, "head changes during generation do not publish an outdated plan");
   assert.equal((await db.select().from(usage)).length, 4, "superseded generation is still metered");
+});
+
+test("final failure marks the plan failed and banners the comment without losing a previous plan", async (t) => {
+  const client = new PGlite(); t.after(() => client.close());
+  const dir = new URL("../../../packages/db/migrations/", import.meta.url);
+  for (const file of (await readdir(dir)).filter((f) => f.endsWith(".sql")).sort()) await client.exec(await readFile(new URL(file, dir), "utf8"));
+  const db = drizzle(client);
+  await db.insert(installations).values({ id: 1, accountLogin: "org", accountType: "Organization" });
+  let currentSha = job.headSha;
+  let state = "open";
+  const comments: { id: number; number: number; body: string; user: { login: string } }[] = [];
+  const paginate = Object.assign(async () => [{ filename: "a.ts", status: "modified", additions: 1, deletions: 0, patch: "+a" }], {
+    async *iterator(_: unknown, args: { issue_number: number }) { yield { data: comments.filter((c) => c.number === args.issue_number) }; },
+  });
+  const octokit = {
+    paginate,
+    rest: {
+      pulls: { get: async () => ({ data: { title: "T", body: "", state, draft: false, head: { sha: currentSha } } }), listFiles() {} },
+      repos: { getContent: async () => { throw Object.assign(new Error("nf"), { status: 404 }); }, getReadme: async () => { throw Object.assign(new Error("nf"), { status: 404 }); } },
+      issues: {
+        listComments() {},
+        createComment: async ({ issue_number, body }: { issue_number: number; body: string }) => { const c = { id: comments.length + 1, number: issue_number, body, user: { login: "oxyqa-staging[bot]" } }; comments.push(c); return { data: c }; },
+        updateComment: async ({ comment_id, body }: { comment_id: number; body: string }) => { comments.find((c) => c.id === comment_id)!.body = body; },
+      },
+    },
+  } as unknown as Octokit;
+  const deps = { db: db as unknown as Database, octokit, slug: "oxyqa-staging" };
+  const planDeps = { ...deps, model: "offline-stub", generate: async () => result };
+  const modelDown = Object.assign(new Error("Overloaded at https://internal"), { name: "AI_APICallError", statusCode: 529 });
+  const failingRun = async (j: PrJob = job) => {
+    const attemptStartedAt = new Date();
+    await assert.rejects(processPlan(j, { ...planDeps, generate: async () => { throw modelDown; } }));
+    return reportPlanFailure(j, modelDown, { ...deps, attemptStartedAt });
+  };
+  const status = async (prNumber = 7) => (await db.select().from(plans).where(eq(plans.prNumber, prNumber)))[0]!.status;
+
+  await t.test("first-ever run fails: standalone banner, plan failed, no raw error text", async () => {
+    const r = await failingRun();
+    assert.equal((r as { failed: string }).failed, "the model provider was overloaded or unavailable");
+    assert.equal(comments.length, 1);
+    assert.match(comments[0]!.body, /\[!WARNING\][\s\S]*`@oxyqa-staging regenerate` to retry/);
+    assert.doesNotMatch(comments[0]!.body, /internal/);
+    assert.equal(await status(), "failed");
+  });
+  await t.test("success after failure replaces the banner with the plan", async () => {
+    await processPlan(job, planDeps);
+    assert.equal(comments.length, 1);
+    assert.doesNotMatch(comments[0]!.body, /WARNING/);
+    assert.equal(await status(), "posted");
+  });
+  await t.test("failed regenerate keeps the previous plan under the banner", async () => {
+    await failingRun();
+    assert.equal(comments.length, 1);
+    assert.match(comments[0]!.body, /WARNING[\s\S]*earlier run[\s\S]*Keyboard login/);
+    assert.equal(await status(), "failed");
+  });
+  await t.test("a run that succeeded after the failing attempt started wins", async () => {
+    const attemptStartedAt = new Date(Date.now() - 60_000);
+    await processPlan(job, planDeps);
+    assert.deepEqual(await reportPlanFailure(job, modelDown, { ...deps, attemptStartedAt }), { skipped: "a later run succeeded" });
+    assert.doesNotMatch(comments[0]!.body, /WARNING/);
+    assert.equal(await status(), "posted");
+  });
+  await t.test("stale or closed PRs stay quiet", async () => {
+    currentSha = "d".repeat(40);
+    assert.deepEqual(await reportPlanFailure(job, modelDown, { ...deps, attemptStartedAt: new Date() }), { skipped: "stale or closed PR" });
+    currentSha = job.headSha; state = "closed";
+    assert.deepEqual(await reportPlanFailure(job, modelDown, { ...deps, attemptStartedAt: new Date() }), { skipped: "stale or closed PR" });
+    assert.doesNotMatch(comments[0]!.body, /WARNING/);
+  });
 });

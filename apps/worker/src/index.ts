@@ -7,7 +7,7 @@ import { processCommand } from "./commands.js";
 import { syncInstallation, type GitHubInstallation } from "./installations.js";
 import { createMemoryStore } from "./memories.js";
 import { writeBotComment } from "./github-comments.js";
-import { processPlan } from "./plans.js";
+import { processPlan, reportPlanFailure } from "./plans.js";
 
 const config = getConfig();
 const connection = createRedisConnection(config.redisUrl);
@@ -66,10 +66,22 @@ const worker = new Worker<OxyqaJob>(
         },
       });
     }
-    return processPlan(job.data, {
-      db, octokit: await githubApp.getInstallationOctokit(job.data.installationId), slug,
-      model: config.llm.model, generate: (input) => generateTestPlan(config.llm, input),
-    });
+    const plan = job.data;
+    const octokit = await githubApp.getInstallationOctokit(plan.installationId);
+    try {
+      return await processPlan(plan, {
+        db, octokit, slug, model: config.llm.model, generate: (input) => generateTestPlan(config.llm, input),
+      });
+    } catch (err) {
+      // attemptsMade counts earlier failures while this attempt is still running.
+      if (job.attemptsMade + 1 >= (job.opts.attempts ?? 1)) {
+        const attemptStartedAt = new Date(job.processedOn ?? Date.now());
+        await reportPlanFailure(plan, err, { db, octokit, slug, attemptStartedAt })
+          .then((r) => console.log(`[oxyqa-worker] PR #${plan.prNumber} — final failure reported: ${JSON.stringify(r)}`))
+          .catch((e) => console.error(`[oxyqa-worker] PR #${plan.prNumber} — could not report failure:`, (e as Error).message));
+      }
+      throw err;
+    }
   },
   { connection, concurrency: 5 },
 );

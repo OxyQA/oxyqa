@@ -29,8 +29,8 @@ projects pause again after ~1 week idle. User cancelled some paid plans;
 continue without reactivating subscriptions. `pnpm test` stays fully offline
 (PGlite, stubbed GitHub/model).
 
-Now building: §5.1 install lifecycle (`feat/install-lifecycle`), then §5.2
-failure UX, then §6 integrations.
+§5.1 install lifecycle merged (#7, migration 0003 applied on staging).
+Now building: §5.2 failure UX (`feat/failure-ux`), then the MVP gate (§5a).
 
 Guided-setup style that worked: agent gives exact dashboard steps + verifies
 each credential via API before moving on; **secrets never pasted into chat**
@@ -123,13 +123,41 @@ Prose context stays in `context.md`. Per-install overrides live in the existing
 2. **Failure UX:** after final retry, set plan `status=failed` and post/update
    the PR comment with a one-line reason + "`@<slug> regenerate` to retry".
    Decision: **comment-first UX; Check Runs stay unused** until exec-test era
-   (permission already granted, no code).
+   (permission already granted, no code). Implementation: the worker reports
+   inside the last attempt (awaited, so shutdown drains it), under the same
+   per-PR advisory lock as publishing. The banner is **prepended** to the bot
+   comment — a previous plan is never discarded — and the next success
+   replaces the whole body. Reasons are fixed user-safe phrases
+   (`describeFailure`); raw errors stay in worker logs. Stale/closed PRs and
+   runs overtaken by a later success stay quiet. Command-job failures are
+   still silent (log only) — revisit if users hit it.
 3. **Observability:** Sentry (free tier) in both services at first external
    user; Langfuse **Cloud** free tier during beta (self-host it only when the
    self-hosted product tier ships). Structured logging (pino) is low priority.
 4. **Free-tier gating:** enforce in worker pre-LLM — count plans per
    installation per calendar month; initial cap **50 plans/mo** (constant, per-
    install override via config JSONB). Build alongside Phase 5.
+
+## 5a. MVP gate — "outside teams can install it" *(proposed 2026-10-02, pending user OK)*
+
+Demo on own repos works today via the staging App. Both Apps are private
+(installable only on the owner account). Before external installs:
+§5.1 ✅ → §5.2 failure UX → **cost guard** (a minimal §5.4 per-install monthly
+plan cap, pulled forward from Phase 5 to protect the LLM bill) → §5.3 Sentry →
+**prod environment** (rename dev App → `oxyqa-dev`, create prod `oxyqa` App
+installable by any account, Railway env #2) → install link + "what leaves
+your repo" note. Not MVP: NL replies, Issues/Linear, dashboard, billing.
+**Open decision (reopens §8 prod sketch):** Supabase free allows 2 active
+projects (dev + staging use both), and the user has cut paid plans — compare
+Railway-hosted Postgres/Redis (usage-billed, no pause, no command caps)
+against Supabase Pro + Upstash fixed before building prod.
+
+**Redis sizing (measured 2026-10-02):** an idle BullMQ worker + webhook on
+staging issued 219 commands / 120 s ≈ **4.7M commands/month**; per-plan job
+traffic is tens of commands. Upstash free (500K/mo) cannot host an always-on
+worker; the fixed 250MB plan ($10/mo, no command cap) is the right fit and
+user count barely moves the bill. Dev Redis stays free — run the dev worker
+only while testing.
 
 ## 6. Phase 3 sketches
 
@@ -163,6 +191,15 @@ Prose context stays in `context.md`. Per-install overrides live in the existing
   and owns the content. Costs an extra LLM call, so it must respect free-tier
   gating. Trigger: Phase 5 onboarding build, or earlier if README-fallback
   plan quality proves weak in beta.
+- **Natural-language replies** *(user, 2026-10-02)* — CodeRabbit-style: keep
+  the leading @mention + write-access check, but route free text through a
+  small structured-output model call to {remember, forget, regenerate, focus,
+  question, help} with extracted args; exact keyword commands stay a no-LLM
+  fast path. Bot always echoes its interpretation ("Saved: …"); `forget`
+  lists what it deactivated. Follow-ons: answer questions about the plan, and
+  inferred memories (`source: inferred`, column already exists). Counts toward
+  free-tier gating. Trigger: after the MVP gate (§5a), or earlier as a demo
+  differentiator.
 - **Jira/Xray** — trigger: first enterprise team asks.
 - **Executable test generation** — trigger: checklist edit-rate measured & good.
 - **Prod environment (Railway env #2, `oxyqa-prod` Supabase paid, fixed-Pro
