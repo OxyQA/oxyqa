@@ -46,9 +46,9 @@ test("tracking issue: one per PR, created then updated, tenant-scoped, permissio
   };
 
   assert.deepEqual(await upsertTrackingIssue(job, deps), { status: "no-plan" });
-  await addPlan("f".repeat(40), "failed");
+  await db.insert(plans).values({ installationId: 1, owner: "org", repo: "repo", prNumber: 7, headSha: "f".repeat(40), status: "failed" });
   await addPlan("e".repeat(40), "posted", 2);
-  assert.deepEqual(await upsertTrackingIssue(job, deps), { status: "no-plan" }, "failed plans and other tenants' plans are not used");
+  assert.deepEqual(await upsertTrackingIssue(job, deps), { status: "no-plan" }, "plans without cases and other tenants' plans are not used");
 
   const first = await addPlan("a".repeat(40), "posted", 1, new Date(Date.now() - 60_000));
   mode = "forbidden";
@@ -69,6 +69,14 @@ test("tracking issue: one per PR, created then updated, tenant-scoped, permissio
   assert.equal(updated.status, "updated");
   assert.equal(issues.size, 1, "a new head updates the same issue instead of opening another");
   assert.match(issues.get(100)!.body, /Summary b[\s\S]*Critical b/);
+
+  // Found live on staging: a plan that is regenerating (or whose last run
+  // failed) still has its previous cases, and must not read as "no plan".
+  await db.update(plans).set({ status: "processing", updatedAt: new Date(Date.now() + 1000) }).where(eq(plans.headSha, "b".repeat(40)));
+  assert.equal((await upsertTrackingIssue(job, deps)).status, "updated", "usable while regenerating");
+  await db.insert(plans).values({ installationId: 1, owner: "org", repo: "repo", prNumber: 7, headSha: "c".repeat(40), status: "failed", updatedAt: new Date(Date.now() + 2000) });
+  assert.equal((await upsertTrackingIssue(job, deps)).status, "updated", "a newer failed run with no cases falls back to the last plan");
+  assert.match(issues.get(100)!.body, /Critical b/);
 
   issues.clear();
   const reopened = await upsertTrackingIssue(job, deps);

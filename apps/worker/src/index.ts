@@ -1,13 +1,14 @@
 // Runtime wiring: GitHub/Redis/Postgres connections stay out of the tested handlers.
 import {
   PR_QUEUE_NAME, createErrorReporter, createLlmObserver, createPrQueue, createRedisConnection,
-  generateTestPlan, getConfig, interpretRoutedCommand, routeCommand, type OxyqaJob,
+  answerPlanQuestion, generateTestPlan, getConfig, interpretRoutedCommand, routeCommand, type OxyqaJob,
 } from "@oxyqa/core";
 import { createDb } from "@oxyqa/db";
 import { Worker } from "bullmq";
 import { App } from "octokit";
 import { runCommand } from "./commands.js";
 import { collectFeedback } from "./feedback.js";
+import { loadLatestPlan } from "./latest-plan.js";
 import { purgeUninstalled, syncInstallation, type GitHubInstallation } from "./installations.js";
 import { createMemoryStore } from "./memories.js";
 import { writeBotComment } from "./github-comments.js";
@@ -81,6 +82,14 @@ const worker = new Worker<OxyqaJob>(
         },
         forgetIds: (c, ids) => memories.forgetIds(c, ids),
         createIssue: (c) => upsertTrackingIssue(c, { db, octokit }),
+        answer: async (c, question) => {
+          const latest = await loadLatestPlan(c, { db, octokit });
+          if (!latest) return null;
+          const { data: pr } = await octokit.rest.pulls.get({ ...scope, pull_number: c.prNumber });
+          return answerPlanQuestion(config.llm, { question, prTitle: pr.title, summary: latest.plan.summary, cases: latest.cases, style: latest.style, slug }, {
+            observer: llmObserver, metadata: { installationId: c.installationId, repo: `${c.owner}/${c.repo}`, prNumber: c.prNumber },
+          });
+        },
         currentHead: async () => {
           const { data } = await octokit.rest.pulls.get({ ...scope, pull_number: command.prNumber });
           return data.state === "open" && !data.draft ? data.head.sha : null;

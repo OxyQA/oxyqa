@@ -110,6 +110,8 @@ On a PR, start a new comment with your app's mention (for example,
 > @oxyqa-staging try again, but concentrate on accessibility this time
 >
 > @oxyqa-staging stop doing the Safari thing, we dropped support
+>
+> @oxyqa-staging why is case 3 critical?
 
 The bot replies with what it understood — the guidance it saved, the memories it
 removed, or the focus it queued — so a misreading is visible and easy to undo.
@@ -128,7 +130,7 @@ Exact commands skip the model call and behave identically:
 
 The app resolves its own slug at startup, so use the dev/staging/prod bot's actual
 mention. Remember/forget inputs allow 2,000 characters; focus allows 1,000.
-Questions and anything unclear get the help text. Memories are scoped to
+Questions about the plan are answered from the plan itself; anything unclear gets the help text. Memories are scoped to
 installation + owner + repository; the latest 20 active memories enter the prompt
 within a ~2k-token budget. Use regenerate after remembering or forgetting to
 apply the change to an existing plan.

@@ -130,6 +130,11 @@ Prose context stays in `context.md`. Per-install overrides live in the existing
   retry. Router calls are not metered against the monthly cap (≈ $0.001
   each) — revisit if abused. `pnpm --filter @oxyqa/worker route:sample` is the
   live regression set (12/12 on 2026-10-02); it never runs in CI.
+- **Plan Q&A (built):** the router's `question` intent answers questions about
+  the PR's posted plan ("why is case 3 critical?", "does this cover X?") with
+  one call on the plan model. Grounded in the stored plan only — the diff is
+  not re-read, so an answer cannot reveal more than the plan comment shows;
+  when coverage is missing it says so. Unmetered, like routing.
 - **Ack:** reply comment via existing PR-comment write. (👍-reaction ack needs
   Issues:write — deferred deliberately; Issues stays read-only until Phase 3a.)
 
@@ -208,9 +213,12 @@ is tens of commands. Measured client-side, an idle worker alone sends 39
 commands / 90 s on defaults and **2 / 90 s with `drainDelay: 60`,
 `stalledInterval: 120s`** (now set), with job pickup still ~0.1–0.2 s. Cost:
 a job orphaned by a crashed worker retries after ≤2 min instead of 30 s.
-**Re-measure staging after this deploys** before deciding whether the Upstash
-free tier (500K/month) can replace the $10 fixed plan — the worker loop was
-not the whole 219, so do not assume it fits. Dev Redis stays free; run the dev
+**Re-measured on staging after deploy (2026-10-02):** Upstash's own counter
+registered no commands across two quiet 120 s windows (was 219), in line with
+the client-side figure. Idle cost is now negligible; a plan job costs tens to
+low hundreds of commands. The free tier (500K/month) looks sufficient for
+staging and an early beta — confirm against the Upstash dashboard's daily
+count for a few days before downgrading the $10 plan. Dev Redis stays free; run the dev
 worker only while testing.
 
 **Incident 2026-10-02 (staging worker down ~03:50–fix):** #17 added a root
@@ -260,10 +268,8 @@ build or start files, confirm the worker log reaches `listening on queue`.
   and owns the content. Costs an extra LLM call, so it must respect free-tier
   gating. Trigger: Phase 5 onboarding build, or earlier if README-fallback
   plan quality proves weak in beta.
-- **Plan Q&A and inferred memories** — follow-ons to natural-language replies
-  (§4): answer questions about the current plan ("why is case 3 critical?"),
-  and learn guidance from ordinary review discussion (`source: inferred`,
-  column exists). Trigger: beta feedback asks for it.
+- **Inferred memories** — learn guidance from ordinary review discussion
+  (`source: inferred`, column exists). Trigger: beta feedback asks for it.
 - **Jira/Xray** — trigger: first enterprise team asks.
 - **Executable test generation** — trigger: checklist edit-rate measured & good.
 - **Prod environment (Railway env #2, `oxyqa-prod` Supabase paid, fixed-Pro

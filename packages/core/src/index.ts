@@ -34,6 +34,7 @@ export * from "./llm/model.js";
 export * from "./llm/schema.js";
 export * from "./llm/generate.js";
 export * from "./llm/route.js";
+export * from "./llm/answer.js";
 export * from "./output/comment.js";
 export * from "./output/failure.js";
 export * from "./observability.js";
